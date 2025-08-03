@@ -1,0 +1,649 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "This is the API for balade, a diagnostic for enterpreneurs.",
+        "title": "balade API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "host": "api.balade.feldrise.com",
+    "basePath": "/api/v1",
+    "paths": {
+        "/authentication/authenticate": {
+            "post": {
+                "description": "Authenticate a user by sending a unique code",
+                "tags": [
+                    "autentication"
+                ],
+                "summary": "Authenticate a user",
+                "operationId": "authenticate",
+                "parameters": [
+                    {
+                        "description": "user's info",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/AuthenticatePostPayload"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "ok",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "bad request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "internal server error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/authentication/check-email": {
+            "get": {
+                "description": "Check if the email exists",
+                "tags": [
+                    "autentication"
+                ],
+                "summary": "Check if the email exists",
+                "operationId": "check-if-email-exists",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "email",
+                        "name": "email",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "ok",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "bad request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "internal server error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/authentication/me": {
+            "get": {
+                "description": "Get the current user",
+                "tags": [
+                    "autentication"
+                ],
+                "summary": "Get the current user",
+                "operationId": "me",
+                "responses": {
+                    "200": {
+                        "description": "ok",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "internal server error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/authentication/verify-authentication": {
+            "post": {
+                "description": "Verify the authentication code",
+                "tags": [
+                    "autentication"
+                ],
+                "summary": "Verify the authentication code",
+                "operationId": "verify-authenticate",
+                "parameters": [
+                    {
+                        "description": "user's info",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/VerifyAuthenticatePostPayload"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "ok",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "bad request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "internal server error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/authentication/{id}": {
+            "put": {
+                "description": "Update the current user",
+                "tags": [
+                    "autentication"
+                ],
+                "summary": "Update the current user",
+                "operationId": "update",
+                "parameters": [
+                    {
+                        "description": "user's info",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "ok",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "bad request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "internal server error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/rambles": {
+            "get": {
+                "description": "Get all rambles with optional status filter",
+                "summary": "Get all Rambles",
+                "operationId": "get-all-rambles",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by status (e.g., 'active', 'archived')",
+                        "name": "status",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/Ramble"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "bad request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "internal server error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Create a new ramble",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "Create Ramble",
+                "operationId": "create-ramble",
+                "parameters": [
+                    {
+                        "description": "Ramble data",
+                        "name": "ramble",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/RambleCreatePayload"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/Ramble"
+                        }
+                    },
+                    "400": {
+                        "description": "bad request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "internal server error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/rambles/{id}": {
+            "get": {
+                "description": "Get a ramble by ID",
+                "summary": "Get Ramble",
+                "operationId": "get-ramble",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Ramble ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Ramble"
+                        }
+                    },
+                    "400": {
+                        "description": "bad request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "internal server error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Update an existing ramble with the provided data",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "Update an existing ramble",
+                "operationId": "update-ramble",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Ramble ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Ramble data",
+                        "name": "ramble",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Ramble"
+                        }
+                    },
+                    "400": {
+                        "description": "bad request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "internal server error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete a ramble by its ID",
+                "summary": "Delete a ramble",
+                "operationId": "delete-ramble",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Ramble ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "401": {
+                        "description": "unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "internal server error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "AuthenticatePostPayload": {
+            "type": "object",
+            "required": [
+                "email"
+            ],
+            "properties": {
+                "email": {
+                    "description": "the user's email",
+                    "type": "string",
+                    "example": "admin@feldrise.com"
+                },
+                "first_name": {
+                    "description": "the user's first name",
+                    "type": "string",
+                    "example": "Victor"
+                },
+                "last_name": {
+                    "description": "the user's last name",
+                    "type": "string",
+                    "example": "DENIS"
+                },
+                "phone": {
+                    "description": "the user's phone",
+                    "type": "string",
+                    "example": "+33612345678"
+                }
+            }
+        },
+        "Ramble": {
+            "type": "object",
+            "properties": {
+                "additional_documents_url": {
+                    "type": "string"
+                },
+                "cover_image_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "date": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "difficulty": {
+                    "type": "string"
+                },
+                "equipment_needed": {
+                    "type": "string"
+                },
+                "estimated_duration": {
+                    "description": "store as HH:MM:SS",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "location": {
+                    "type": "string"
+                },
+                "max_participants": {
+                    "type": "integer"
+                },
+                "meeting_point": {
+                    "type": "string"
+                },
+                "prerequisites": {
+                    "type": "string"
+                },
+                "prices": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.RamblePrice"
+                    }
+                },
+                "status": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "RambleCreatePayload": {
+            "type": "object",
+            "required": [
+                "difficulty",
+                "prices",
+                "title",
+                "type"
+            ],
+            "properties": {
+                "additional_documents_url": {
+                    "type": "string"
+                },
+                "cover_image_url": {
+                    "type": "string"
+                },
+                "date": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "difficulty": {
+                    "type": "string"
+                },
+                "equipment_needed": {
+                    "type": "string"
+                },
+                "estimated_duration": {
+                    "description": "store as HH:MM:SS",
+                    "type": "string"
+                },
+                "location": {
+                    "type": "string"
+                },
+                "max_participants": {
+                    "type": "integer"
+                },
+                "meeting_point": {
+                    "type": "string"
+                },
+                "prerequisites": {
+                    "type": "string"
+                },
+                "prices": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.RamblePrice"
+                    }
+                },
+                "title": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "VerifyAuthenticatePostPayload": {
+            "type": "object",
+            "required": [
+                "code",
+                "email"
+            ],
+            "properties": {
+                "code": {
+                    "description": "the verification code",
+                    "type": "string",
+                    "example": "123456"
+                },
+                "email": {
+                    "description": "the user's email",
+                    "type": "string",
+                    "example": "admin@feldrise.com"
+                }
+            }
+        },
+        "model.RamblePrice": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "label": {
+                    "type": "string"
+                }
+            }
+        }
+    }
+}

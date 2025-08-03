@@ -1,0 +1,27 @@
+version: '3.8'
+name: balade-api
+
+services:
+  db:
+    image: postgres:15
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: balade
+      POSTGRES_PASSWORD: balade
+      POSTGRES_DB: balade
+    ports:
+      - "5432:5432"
+  dbAdmin: 
+    image: dpage/pgadmin4:8
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: contact@balade.com
+      PGADMIN_DEFAULT_PASSWORD: balade
+    ports:
+      - "5050:80"
+
+volumes:
+  postgres_data:
+  pgadmin_data:

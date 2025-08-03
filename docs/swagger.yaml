@@ -1,0 +1,437 @@
+basePath: /api/v1
+definitions:
+  AuthenticatePostPayload:
+    properties:
+      email:
+        description: the user's email
+        example: admin@feldrise.com
+        type: string
+      first_name:
+        description: the user's first name
+        example: Victor
+        type: string
+      last_name:
+        description: the user's last name
+        example: DENIS
+        type: string
+      phone:
+        description: the user's phone
+        example: "+33612345678"
+        type: string
+    required:
+    - email
+    type: object
+  Ramble:
+    properties:
+      additional_documents_url:
+        type: string
+      cover_image_url:
+        type: string
+      created_at:
+        type: string
+      date:
+        type: string
+      description:
+        type: string
+      difficulty:
+        type: string
+      equipment_needed:
+        type: string
+      estimated_duration:
+        description: store as HH:MM:SS
+        type: string
+      id:
+        type: integer
+      location:
+        type: string
+      max_participants:
+        type: integer
+      meeting_point:
+        type: string
+      prerequisites:
+        type: string
+      prices:
+        items:
+          $ref: '#/definitions/model.RamblePrice'
+        type: array
+      status:
+        type: string
+      title:
+        type: string
+      type:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  RambleCreatePayload:
+    properties:
+      additional_documents_url:
+        type: string
+      cover_image_url:
+        type: string
+      date:
+        type: string
+      description:
+        type: string
+      difficulty:
+        type: string
+      equipment_needed:
+        type: string
+      estimated_duration:
+        description: store as HH:MM:SS
+        type: string
+      location:
+        type: string
+      max_participants:
+        type: integer
+      meeting_point:
+        type: string
+      prerequisites:
+        type: string
+      prices:
+        items:
+          $ref: '#/definitions/model.RamblePrice'
+        type: array
+      title:
+        type: string
+      type:
+        type: string
+    required:
+    - difficulty
+    - prices
+    - title
+    - type
+    type: object
+  VerifyAuthenticatePostPayload:
+    properties:
+      code:
+        description: the verification code
+        example: "123456"
+        type: string
+      email:
+        description: the user's email
+        example: admin@feldrise.com
+        type: string
+    required:
+    - code
+    - email
+    type: object
+  model.RamblePrice:
+    properties:
+      amount:
+        type: number
+      label:
+        type: string
+    type: object
+host: api.balade.feldrise.com
+info:
+  contact: {}
+  description: This is the API for balade, a diagnostic for enterpreneurs.
+  title: balade API
+  version: "1.0"
+paths:
+  /authentication/{id}:
+    put:
+      description: Update the current user
+      operationId: update
+      parameters:
+      - description: user's info
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      responses:
+        "200":
+          description: ok
+          schema:
+            type: string
+        "400":
+          description: bad request
+          schema:
+            type: string
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Update the current user
+      tags:
+      - autentication
+  /authentication/authenticate:
+    post:
+      description: Authenticate a user by sending a unique code
+      operationId: authenticate
+      parameters:
+      - description: user's info
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/AuthenticatePostPayload'
+      responses:
+        "200":
+          description: ok
+          schema:
+            type: string
+        "400":
+          description: bad request
+          schema:
+            type: string
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Authenticate a user
+      tags:
+      - autentication
+  /authentication/check-email:
+    get:
+      description: Check if the email exists
+      operationId: check-if-email-exists
+      parameters:
+      - description: email
+        in: query
+        name: email
+        required: true
+        type: string
+      responses:
+        "200":
+          description: ok
+          schema:
+            type: string
+        "400":
+          description: bad request
+          schema:
+            type: string
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Check if the email exists
+      tags:
+      - autentication
+  /authentication/me:
+    get:
+      description: Get the current user
+      operationId: me
+      responses:
+        "200":
+          description: ok
+          schema:
+            type: string
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Get the current user
+      tags:
+      - autentication
+  /authentication/verify-authentication:
+    post:
+      description: Verify the authentication code
+      operationId: verify-authenticate
+      parameters:
+      - description: user's info
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/VerifyAuthenticatePostPayload'
+      responses:
+        "200":
+          description: ok
+          schema:
+            type: string
+        "400":
+          description: bad request
+          schema:
+            type: string
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Verify the authentication code
+      tags:
+      - autentication
+  /rambles:
+    get:
+      description: Get all rambles with optional status filter
+      operationId: get-all-rambles
+      parameters:
+      - description: Filter by status (e.g., 'active', 'archived')
+        in: query
+        name: status
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/Ramble'
+            type: array
+        "400":
+          description: bad request
+          schema:
+            type: string
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Get all Rambles
+    post:
+      consumes:
+      - application/json
+      description: Create a new ramble
+      operationId: create-ramble
+      parameters:
+      - description: Ramble data
+        in: body
+        name: ramble
+        required: true
+        schema:
+          $ref: '#/definitions/RambleCreatePayload'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/Ramble'
+        "400":
+          description: bad request
+          schema:
+            type: string
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Create Ramble
+  /rambles/{id}:
+    delete:
+      description: Delete a ramble by its ID
+      operationId: delete-ramble
+      parameters:
+      - description: Ramble ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "404":
+          description: not found
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Delete a ramble
+    get:
+      description: Get a ramble by ID
+      operationId: get-ramble
+      parameters:
+      - description: Ramble ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Ramble'
+        "400":
+          description: bad request
+          schema:
+            type: string
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "404":
+          description: not found
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Get Ramble
+    put:
+      consumes:
+      - application/json
+      description: Update an existing ramble with the provided data
+      operationId: update-ramble
+      parameters:
+      - description: Ramble ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Ramble data
+        in: body
+        name: ramble
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Ramble'
+        "400":
+          description: bad request
+          schema:
+            type: string
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "404":
+          description: not found
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Update an existing ramble
+swagger: "2.0"

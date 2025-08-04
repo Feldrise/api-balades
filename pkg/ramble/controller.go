@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"feldrise.com/balade/database/dbmodel"
 	"feldrise.com/balade/helper"
@@ -54,21 +55,85 @@ func (config *Config) Get(w http.ResponseWriter, r *http.Request) {
 
 // GetAll godoc
 // @Summary Get all Rambles
-// @Description Get all rambles with optional status filter
+// @Description Get all rambles with optional filters
 // @ID get-all-rambles
 // @Param status query string false "Filter by status (e.g., 'active', 'archived')"
+// @Param type query string false "Filter by ramble type"
+// @Param difficulty query string false "Filter by difficulty level"
+// @Param location query string false "Filter by location (partial match)"
+// @Param search query string false "Search in title, description, or location"
+// @Param date_from query string false "Filter rambles from this date (RFC3339 format)"
+// @Param date_to query string false "Filter rambles to this date (RFC3339 format)"
+// @Param guide_id query int false "Filter rambles by specific guide ID"
+// @Param is_active query boolean false "Filter by active status (non-archived rambles)"
 // @Success 200 {array} Ramble
 // @Failure 400 {string} string "bad request"
 // @Failure 401 {string} string "unauthorized"
 // @Failure 500 {string} string "internal server error"
 // @Router /rambles [get]
 func (config *Config) GetAll(w http.ResponseWriter, r *http.Request) {
-	status := r.URL.Query().Get("status")
+	queryParams := r.URL.Query()
 	var filter *dbmodel.RambleFilter
 
-	if status != "" {
-		filter = &dbmodel.RambleFilter{
-			Status: &status,
+	// Initialize filter if any parameters are provided
+	if len(queryParams) > 0 {
+		filter = &dbmodel.RambleFilter{}
+
+		if status := queryParams.Get("status"); status != "" {
+			filter.Status = &status
+		}
+
+		if rambleType := queryParams.Get("type"); rambleType != "" {
+			filter.Type = &rambleType
+		}
+
+		if difficulty := queryParams.Get("difficulty"); difficulty != "" {
+			filter.Difficulty = &difficulty
+		}
+
+		if location := queryParams.Get("location"); location != "" {
+			filter.Location = &location
+		}
+
+		if search := queryParams.Get("search"); search != "" {
+			filter.Search = &search
+		}
+
+		if dateFromStr := queryParams.Get("date_from"); dateFromStr != "" {
+			if dateFrom, err := time.Parse(time.RFC3339, dateFromStr); err == nil {
+				filter.DateFrom = &dateFrom
+			} else {
+				render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("invalid date_from format: %s", dateFromStr)))
+				return
+			}
+		}
+
+		if dateToStr := queryParams.Get("date_to"); dateToStr != "" {
+			if dateTo, err := time.Parse(time.RFC3339, dateToStr); err == nil {
+				filter.DateTo = &dateTo
+			} else {
+				render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("invalid date_to format: %s", dateToStr)))
+				return
+			}
+		}
+
+		if guideIDStr := queryParams.Get("guide_id"); guideIDStr != "" {
+			if guideID, err := strconv.ParseUint(guideIDStr, 10, 64); err == nil {
+				guideIDUint := uint(guideID)
+				filter.GuideID = &guideIDUint
+			} else {
+				render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("invalid guide_id: %s", guideIDStr)))
+				return
+			}
+		}
+
+		if isActiveStr := queryParams.Get("is_active"); isActiveStr != "" {
+			if isActive, err := strconv.ParseBool(isActiveStr); err == nil {
+				filter.IsActive = &isActive
+			} else {
+				render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("invalid is_active value: %s", isActiveStr)))
+				return
+			}
 		}
 	}
 
@@ -162,7 +227,7 @@ func (config *Config) Create(w http.ResponseWriter, r *http.Request) {
 			fmt.Printf("Failed to save ramble cover image: %v\n", err)
 		} else {
 			// Update the ramble with the cover image filename
-			dbRamble.CoverImageURL = &filename
+			dbRamble.CoverImage = &filename
 		}
 	}
 

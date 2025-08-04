@@ -29,7 +29,7 @@ type Ramble struct {
 	EstimatedDuration      *string       `json:"estimated_duration,omitempty"` // store as HH:MM:SS
 	EquipmentNeeded        *string       `json:"equipment_needed,omitempty"`
 	Prerequisites          *string       `json:"prerequisites,omitempty"`
-	CoverImageURL          *string       `json:"cover_image_url,omitempty"`
+	CoverImage             *string       `json:"cover_image,omitempty"`
 	AdditionalDocumentsURL *string       `json:"additional_documents_url,omitempty"`
 	Guides                 []Guide       `json:"guides,omitempty"`
 } // @name Ramble

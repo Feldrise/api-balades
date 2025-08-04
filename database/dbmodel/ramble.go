@@ -36,7 +36,7 @@ type Ramble struct {
 	EstimatedDuration      *string
 	EquipmentNeeded        *string
 	Prerequisites          *string
-	CoverImageURL          *string
+	CoverImage             *string
 	AdditionalDocumentsURL *string
 
 	// Many-to-many relationship with guides
@@ -77,14 +77,22 @@ func (rm Ramble) ToModel() model.Ramble {
 		EstimatedDuration:      rm.EstimatedDuration,
 		EquipmentNeeded:        rm.EquipmentNeeded,
 		Prerequisites:          rm.Prerequisites,
-		CoverImageURL:          rm.CoverImageURL,
+		CoverImage:             rm.CoverImage,
 		AdditionalDocumentsURL: rm.AdditionalDocumentsURL,
 		Guides:                 guides,
 	}
 }
 
 type RambleFilter struct {
-	Status *string
+	Status     *string
+	Type       *string
+	Difficulty *string
+	Location   *string
+	Search     *string    // Search in title, description, location
+	DateFrom   *time.Time // Filter rambles from this date
+	DateTo     *time.Time // Filter rambles to this date
+	GuideID    *uint      // Filter rambles by specific guide
+	IsActive   *bool      // Filter by active status (non-archived)
 }
 
 type RambleRepository interface {
@@ -131,8 +139,48 @@ func (r *rambleRepository) FindAll(filter *RambleFilter) ([]Ramble, error) {
 	var rambles []Ramble
 	tx := r.db.WithContext(ctx).Model(&Ramble{})
 
-	if filter != nil && filter.Status != nil {
-		tx = tx.Where("status = ?", *filter.Status)
+	if filter != nil {
+		if filter.Status != nil {
+			tx = tx.Where("status = ?", *filter.Status)
+		}
+
+		if filter.Type != nil {
+			tx = tx.Where("type = ?", *filter.Type)
+		}
+
+		if filter.Difficulty != nil {
+			tx = tx.Where("difficulty = ?", *filter.Difficulty)
+		}
+
+		if filter.Location != nil {
+			tx = tx.Where("location ILIKE ?", "%"+*filter.Location+"%")
+		}
+
+		if filter.Search != nil {
+			search := "%" + *filter.Search + "%"
+			tx = tx.Where("title ILIKE ? OR description ILIKE ? OR location ILIKE ?", search, search, search)
+		}
+
+		if filter.DateFrom != nil {
+			tx = tx.Where("date >= ?", *filter.DateFrom)
+		}
+
+		if filter.DateTo != nil {
+			tx = tx.Where("date <= ?", *filter.DateTo)
+		}
+
+		if filter.GuideID != nil {
+			tx = tx.Joins("JOIN ramble_guides ON rambles.id = ramble_guides.ramble_id").
+				Where("ramble_guides.guide_id = ?", *filter.GuideID)
+		}
+
+		if filter.IsActive != nil {
+			if *filter.IsActive {
+				tx = tx.Where("status != ?", "archived")
+			} else {
+				tx = tx.Where("status = ?", "archived")
+			}
+		}
 	}
 
 	tx = tx.Preload("Prices").Preload("Guides")
@@ -155,9 +203,18 @@ func (r *rambleRepository) Update(ramble *Ramble) (*Ramble, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// Delete existing prices
 	err := r.db.WithContext(ctx).Model(&RamblePrice{}).
 		Where("ramble_id = ?", ramble.ID).
 		Delete(&RamblePrice{}).Error
+
+	err = r.db.WithContext(ctx).Model(&RambleGuide{}).
+		Where("ramble_id = ?", ramble.ID).
+		Delete(&RambleGuide{}).Error
+
+	if err != nil {
+		return nil, err
+	}
 
 	tx := r.db.WithContext(ctx).Session(&gorm.Session{FullSaveAssociations: true})
 

@@ -2,6 +2,7 @@ package ramble
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -12,6 +13,7 @@ import (
 	"feldrise.com/balade/pkg/model"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/render"
+	"gorm.io/gorm"
 )
 
 // Get godoc
@@ -114,20 +116,18 @@ func (config *Config) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dbRamble := &dbmodel.Ramble{
-		Title:                  *payload.Title,
-		Description:            payload.Description,
-		Type:                   *payload.Type,
-		Date:                   payload.Date,
-		Location:               payload.Location,
-		MeetingPoint:           payload.MeetingPoint,
-		MaxParticipants:        payload.MaxParticipants,
-		Difficulty:             *payload.Difficulty,
-		EstimatedDuration:      payload.EstimatedDuration,
-		EquipmentNeeded:        payload.EquipmentNeeded,
-		Prerequisites:          payload.Prerequisites,
-		CoverImageURL:          payload.CoverImageURL,
-		AdditionalDocumentsURL: payload.AdditionalDocumentsURL,
-		Prices:                 make([]dbmodel.RamblePrice, len(payload.Prices)),
+		Title:             *payload.Title,
+		Description:       payload.Description,
+		Type:              *payload.Type,
+		Date:              payload.Date,
+		Location:          payload.Location,
+		MeetingPoint:      payload.MeetingPoint,
+		MaxParticipants:   payload.MaxParticipants,
+		Difficulty:        *payload.Difficulty,
+		EstimatedDuration: payload.EstimatedDuration,
+		EquipmentNeeded:   payload.EquipmentNeeded,
+		Prerequisites:     payload.Prerequisites,
+		Prices:            make([]dbmodel.RamblePrice, len(payload.Prices)),
 	}
 
 	for i, price := range payload.Prices {
@@ -137,10 +137,56 @@ func (config *Config) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Handle guide associations if provided
+	if len(payload.GuideIDs) > 0 {
+		guides := make([]dbmodel.Guide, len(payload.GuideIDs))
+		for i, guideID := range payload.GuideIDs {
+			guides[i] = dbmodel.Guide{Model: gorm.Model{ID: guideID}}
+		}
+		dbRamble.Guides = guides
+	}
+
+	// Create the ramble first to get the ID
 	dbRamble, err := config.RambleRepository.Create(dbRamble)
 	if err != nil {
 		render.Render(w, r, errors.ErrServerError(err))
 		return
+	}
+
+	// Handle cover image upload if provided
+	if payload.CoverImageBase64 != nil && *payload.CoverImageBase64 != "" {
+		rambleID := fmt.Sprintf("%d", dbRamble.ID)
+		filename, err := helper.SaveBase64Image(*payload.CoverImageBase64, config.Constants.DataPath, "ramble", rambleID)
+		if err != nil {
+			// Log the error but don't fail the creation
+			fmt.Printf("Failed to save ramble cover image: %v\n", err)
+		} else {
+			// Update the ramble with the cover image filename
+			dbRamble.CoverImageURL = &filename
+		}
+	}
+
+	// Handle additional document upload if provided
+	if payload.AdditionalDocumentBase64 != nil && *payload.AdditionalDocumentBase64 != "" {
+		rambleID := fmt.Sprintf("%d", dbRamble.ID)
+		filename, err := helper.SaveBase64Document(*payload.AdditionalDocumentBase64, config.Constants.DataPath, "ramble", rambleID, "document_")
+		if err != nil {
+			// Log the error but don't fail the creation
+			fmt.Printf("Failed to save ramble additional document: %v\n", err)
+		} else {
+			// Update the ramble with the additional document filename
+			dbRamble.AdditionalDocumentsURL = &filename
+		}
+	}
+
+	// Update the ramble if any files were uploaded
+	if (payload.CoverImageBase64 != nil && *payload.CoverImageBase64 != "") ||
+		(payload.AdditionalDocumentBase64 != nil && *payload.AdditionalDocumentBase64 != "") {
+		dbRamble, err = config.RambleRepository.Update(dbRamble)
+		if err != nil {
+			// Log the error but don't fail the creation
+			fmt.Printf("Failed to update ramble with file URLs: %v\n", err)
+		}
 	}
 
 	render.Status(r, http.StatusCreated)
@@ -198,6 +244,20 @@ func (config *Config) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	helper.ApplyChanges(data, dbRamble)
+
+	// Handle guide IDs if provided in the update
+	if guideIDsInterface, exists := data["guide_ids"]; exists {
+		if guideIDsSlice, ok := guideIDsInterface.([]interface{}); ok {
+			guides := make([]dbmodel.Guide, len(guideIDsSlice))
+			for i, guideIDInterface := range guideIDsSlice {
+				if guideIDFloat, ok := guideIDInterface.(float64); ok {
+					guideID := uint(guideIDFloat)
+					guides[i] = dbmodel.Guide{Model: gorm.Model{ID: guideID}}
+				}
+			}
+			dbRamble.Guides = guides
+		}
+	}
 
 	dbRamble, err = config.RambleRepository.Update(dbRamble)
 	if err != nil {

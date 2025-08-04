@@ -31,23 +31,25 @@ type Ramble struct {
 	Prerequisites          *string       `json:"prerequisites,omitempty"`
 	CoverImageURL          *string       `json:"cover_image_url,omitempty"`
 	AdditionalDocumentsURL *string       `json:"additional_documents_url,omitempty"`
+	Guides                 []Guide       `json:"guides,omitempty"`
 } // @name Ramble
 
 type RambleCreatePayload struct {
-	Title                  *string       `json:"title" binding:"required"`
-	Description            *string       `json:"description,omitempty"`
-	Type                   *string       `json:"type" binding:"required"`
-	Date                   *time.Time    `json:"date,omitempty"`
-	Location               *string       `json:"location,omitempty"`
-	MeetingPoint           *string       `json:"meeting_point,omitempty"`
-	MaxParticipants        *int          `json:"max_participants,omitempty"`
-	Difficulty             *string       `json:"difficulty" binding:"required"`
-	EstimatedDuration      *string       `json:"estimated_duration,omitempty"` // store as HH:MM:SS
-	EquipmentNeeded        *string       `json:"equipment_needed,omitempty"`
-	Prerequisites          *string       `json:"prerequisites,omitempty"`
-	CoverImageURL          *string       `json:"cover_image_url,omitempty"`
-	AdditionalDocumentsURL *string       `json:"additional_documents_url,omitempty"`
-	Prices                 []RamblePrice `json:"prices" binding:"required"`
+	Title                    *string       `json:"title" binding:"required"`
+	Description              *string       `json:"description,omitempty"`
+	Type                     *string       `json:"type" binding:"required"`
+	Date                     *time.Time    `json:"date,omitempty"`
+	Location                 *string       `json:"location,omitempty"`
+	MeetingPoint             *string       `json:"meeting_point,omitempty"`
+	MaxParticipants          *int          `json:"max_participants,omitempty"`
+	Difficulty               *string       `json:"difficulty" binding:"required"`
+	EstimatedDuration        *string       `json:"estimated_duration,omitempty"` // store as HH:MM:SS
+	EquipmentNeeded          *string       `json:"equipment_needed,omitempty"`
+	Prerequisites            *string       `json:"prerequisites,omitempty"`
+	CoverImageBase64         *string       `json:"cover_image_base64,omitempty"`         // Base64 encoded cover image
+	AdditionalDocumentBase64 *string       `json:"additional_document_base64,omitempty"` // Base64 encoded document
+	GuideIDs                 []uint        `json:"guide_ids,omitempty"`                  // Array of guide IDs
+	Prices                   []RamblePrice `json:"prices" binding:"required"`
 } // @name RambleCreatePayload
 
 func (rb *RambleCreatePayload) Bind(r *http.Request) error {

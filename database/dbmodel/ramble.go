@@ -39,6 +39,9 @@ type Ramble struct {
 	CoverImageURL          *string
 	AdditionalDocumentsURL *string
 
+	// Many-to-many relationship with guides
+	Guides []Guide `gorm:"many2many:ramble_guides;"`
+
 	// Foreign Objects
 	Prices []RamblePrice `gorm:"foreignKey:RambleID;"`
 }
@@ -50,6 +53,11 @@ func (rm Ramble) ToModel() model.Ramble {
 			Label:  price.Label,
 			Amount: price.Amount,
 		})
+	}
+
+	guides := []model.Guide{}
+	for _, guide := range rm.Guides {
+		guides = append(guides, guide.ToModel())
 	}
 
 	return model.Ramble{
@@ -71,6 +79,7 @@ func (rm Ramble) ToModel() model.Ramble {
 		Prerequisites:          rm.Prerequisites,
 		CoverImageURL:          rm.CoverImageURL,
 		AdditionalDocumentsURL: rm.AdditionalDocumentsURL,
+		Guides:                 guides,
 	}
 }
 
@@ -101,7 +110,7 @@ func (r *rambleRepository) FindByID(id uint) (*Ramble, error) {
 	var ramble Ramble
 	tx := r.db.WithContext(ctx).Model(&ramble)
 
-	tx = tx.Preload("Prices")
+	tx = tx.Preload("Prices").Preload("Guides")
 
 	err := tx.First(&ramble, id).Error
 
@@ -126,7 +135,7 @@ func (r *rambleRepository) FindAll(filter *RambleFilter) ([]Ramble, error) {
 		tx = tx.Where("status = ?", *filter.Status)
 	}
 
-	tx = tx.Preload("Prices")
+	tx = tx.Preload("Prices").Preload("Guides")
 
 	err := tx.Find(&rambles).Error
 
@@ -146,16 +155,13 @@ func (r *rambleRepository) Update(ramble *Ramble) (*Ramble, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Ensure the prices are properly associated
-	// First remove existing prices
-	err := r.db.WithContext(ctx).Model(&ramble).Association("Prices").Clear()
+	err := r.db.WithContext(ctx).Model(&RamblePrice{}).
+		Where("ramble_id = ?", ramble.ID).
+		Delete(&RamblePrice{}).Error
 
-	if err != nil {
-		return nil, err
-	}
+	tx := r.db.WithContext(ctx).Session(&gorm.Session{FullSaveAssociations: true})
 
-	// Then add the new prices
-	err = r.db.WithContext(ctx).Save(ramble).Error
+	err = tx.Save(ramble).Error
 
 	return ramble, err
 }

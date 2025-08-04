@@ -7,6 +7,7 @@ import (
 	"feldrise.com/balade/config"
 	_ "feldrise.com/balade/docs"
 	"feldrise.com/balade/pkg/authentication"
+	"feldrise.com/balade/pkg/guide"
 	"feldrise.com/balade/pkg/ramble"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
@@ -34,6 +35,7 @@ func Routes(configuration *config.Config) *chi.Mux {
 
 	router.Route("/api/v1", func(r chi.Router) {
 		r.Mount("/authentication", authentication.New(configuration).Routes())
+		r.Mount("/guides", guide.New(configuration).Routes())
 		r.Mount("/rambles", ramble.New(configuration).Routes())
 	})
 

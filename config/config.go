@@ -46,6 +46,7 @@ type Config struct {
 
 	// Repositories
 	RambleRepository                 dbmodel.RambleRepository
+	GuideRepository                  dbmodel.GuideRepository
 	UserPermissionOverrideRepository dbmodel.UserPermissionOverrideRepository
 	UserRepository                   dbmodel.UserRepository
 
@@ -126,6 +127,7 @@ func New() (*Config, error) {
 	database.Migrate(databaseSession)
 
 	config.RambleRepository = dbmodel.NewRambleRepository(databaseSession)
+	config.GuideRepository = dbmodel.NewGuideRepository(databaseSession)
 	config.UserPermissionOverrideRepository = dbmodel.NewUserPermissionOverrideRepository(databaseSession)
 	config.UserRepository = dbmodel.NewUserRepository(databaseSession)
 

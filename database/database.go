@@ -18,6 +18,9 @@ func Migrate(database *gorm.DB) {
 		&dbmodel.Role{},
 		&dbmodel.UserPermissionOverride{},
 		&dbmodel.Ramble{},
+		&dbmodel.RamblePrice{},
+		&dbmodel.Guide{},
+		&dbmodel.RambleGuide{},
 	)
 
 	log.Println("Database migrated")

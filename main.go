@@ -9,6 +9,8 @@ import (
 	"feldrise.com/balade/pkg/authentication"
 	"feldrise.com/balade/pkg/guide"
 	"feldrise.com/balade/pkg/ramble"
+	"feldrise.com/balade/pkg/registration"
+	"feldrise.com/balade/pkg/scheduler"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
 	"github.com/go-chi/render"
@@ -37,6 +39,7 @@ func Routes(configuration *config.Config) *chi.Mux {
 		r.Mount("/authentication", authentication.New(configuration).Routes())
 		r.Mount("/guides", guide.New(configuration).Routes())
 		r.Mount("/rambles", ramble.New(configuration).Routes())
+		r.Mount("/registrations", registration.New(configuration).Routes())
 	})
 
 	fs := http.FileServer(http.Dir(configuration.Constants.DataPath + "/uploads"))
@@ -57,6 +60,16 @@ func main() {
 	if err != nil {
 		log.Panicln("Error initializing configuration:", err)
 	}
+
+	// Start the registration scheduler
+	registrationScheduler := scheduler.NewRegistrationScheduler(
+		configuration.RambleRepository,
+		configuration.RambleRegistrationRepository,
+		configuration.RambleRegistrationGroupRepository,
+		configuration.EmailService,
+		configuration.ApplicationURL,
+	)
+	registrationScheduler.StartScheduler()
 
 	// We initialize the routes
 	router := Routes(configuration)

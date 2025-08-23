@@ -21,6 +21,8 @@ func Migrate(database *gorm.DB) {
 		&dbmodel.RamblePrice{},
 		&dbmodel.Guide{},
 		&dbmodel.RambleGuide{},
+		&dbmodel.RambleRegistrationGroup{},
+		&dbmodel.RambleRegistration{},
 	)
 
 	log.Println("Database migrated")

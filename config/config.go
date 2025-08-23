@@ -45,10 +45,12 @@ type Config struct {
 	Constants
 
 	// Repositories
-	RambleRepository                 dbmodel.RambleRepository
-	GuideRepository                  dbmodel.GuideRepository
-	UserPermissionOverrideRepository dbmodel.UserPermissionOverrideRepository
-	UserRepository                   dbmodel.UserRepository
+	RambleRepository                  dbmodel.RambleRepository
+	RambleRegistrationRepository      dbmodel.RambleRegistrationRepository
+	RambleRegistrationGroupRepository dbmodel.RambleRegistrationGroupRepository
+	GuideRepository                   dbmodel.GuideRepository
+	UserPermissionOverrideRepository  dbmodel.UserPermissionOverrideRepository
+	UserRepository                    dbmodel.UserRepository
 
 	// Services
 	EmailService email.EmailService
@@ -127,6 +129,8 @@ func New() (*Config, error) {
 	database.Migrate(databaseSession)
 
 	config.RambleRepository = dbmodel.NewRambleRepository(databaseSession)
+	config.RambleRegistrationRepository = dbmodel.NewRambleRegistrationRepository(databaseSession)
+	config.RambleRegistrationGroupRepository = dbmodel.NewRambleRegistrationGroupRepository(databaseSession)
 	config.GuideRepository = dbmodel.NewGuideRepository(databaseSession)
 	config.UserPermissionOverrideRepository = dbmodel.NewUserPermissionOverrideRepository(databaseSession)
 	config.UserRepository = dbmodel.NewUserRepository(databaseSession)

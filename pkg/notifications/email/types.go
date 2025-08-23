@@ -8,6 +8,36 @@ type AuthenticationData struct {
 	Code string
 }
 
+type RegistrationConfirmationData struct {
+	FirstName        string
+	LastName         string
+	Title            string
+	Date             string
+	Location         string
+	Status           string
+	IsGroup          bool
+	ParticipantCount int
+	ParticipantNames []string
+}
+
+type EventConfirmationRequestData struct {
+	FirstName            string
+	LastName             string
+	Title                string
+	Date                 string
+	Location             string
+	ConfirmationDeadline string
+	ConfirmationURL      string
+}
+
+type SpotAvailableData struct {
+	FirstName string
+	LastName  string
+	Title     string
+	Date      string
+	Location  string
+}
+
 // Service
 
 type Credentials struct {

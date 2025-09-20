@@ -43,7 +43,31 @@ type Ramble struct {
 	Guides []Guide `gorm:"many2many:ramble_guides;"`
 
 	// Foreign Objects
-	Prices []RamblePrice `gorm:"foreignKey:RambleID;"`
+	Prices        []RamblePrice        `gorm:"foreignKey:RambleID;"`
+	Registrations []RambleRegistration `gorm:"foreignKey:RambleID;"`
+
+	// Computed fields (not stored in database)
+	PlacesLeft *int `gorm:"-"`
+}
+
+// CalculatePlacesLeft computes the number of available places for the ramble
+func (rm *Ramble) CalculatePlacesLeft() {
+	if rm.MaxParticipants == nil {
+		rm.PlacesLeft = nil // Unlimited places
+		return
+	}
+
+	reservationCount := 0
+	for _, registration := range rm.Registrations {
+		if registration.Status != "cancelled" {
+			reservationCount++
+		}
+	}
+
+	placesLeft := *rm.MaxParticipants - reservationCount
+
+	// We keep the negative value to indicate waitlist status
+	rm.PlacesLeft = &placesLeft
 }
 
 func (rm Ramble) ToModel() model.Ramble {
@@ -59,6 +83,9 @@ func (rm Ramble) ToModel() model.Ramble {
 	for _, guide := range rm.Guides {
 		guides = append(guides, guide.ToModel())
 	}
+
+	// Calculate places left
+	rm.CalculatePlacesLeft()
 
 	return model.Ramble{
 		ID:                     rm.ID,
@@ -80,6 +107,7 @@ func (rm Ramble) ToModel() model.Ramble {
 		CoverImage:             rm.CoverImage,
 		AdditionalDocumentsURL: rm.AdditionalDocumentsURL,
 		Guides:                 guides,
+		PlacesLeft:             rm.PlacesLeft,
 	}
 }
 
@@ -118,7 +146,7 @@ func (r *rambleRepository) FindByID(id uint) (*Ramble, error) {
 	var ramble Ramble
 	tx := r.db.WithContext(ctx).Model(&ramble)
 
-	tx = tx.Preload("Prices").Preload("Guides")
+	tx = tx.Preload("Prices").Preload("Guides").Preload("Registrations")
 
 	err := tx.First(&ramble, id).Error
 
@@ -183,7 +211,7 @@ func (r *rambleRepository) FindAll(filter *RambleFilter) ([]Ramble, error) {
 		}
 	}
 
-	tx = tx.Preload("Prices").Preload("Guides")
+	tx = tx.Preload("Prices").Preload("Guides").Preload("Registrations")
 
 	err := tx.Find(&rambles).Error
 

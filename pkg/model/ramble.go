@@ -32,6 +32,7 @@ type Ramble struct {
 	CoverImage             *string       `json:"cover_image,omitempty"`
 	AdditionalDocumentsURL *string       `json:"additional_documents_url,omitempty"`
 	Guides                 []Guide       `json:"guides,omitempty"`
+	PlacesLeft             *int          `json:"places_left,omitempty"`
 } // @name Ramble
 
 type RambleCreatePayload struct {

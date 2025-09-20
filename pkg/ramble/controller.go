@@ -247,7 +247,7 @@ func (config *Config) Create(w http.ResponseWriter, r *http.Request) {
 	// Update the ramble if any files were uploaded
 	if (payload.CoverImageBase64 != nil && *payload.CoverImageBase64 != "") ||
 		(payload.AdditionalDocumentBase64 != nil && *payload.AdditionalDocumentBase64 != "") {
-		dbRamble, err = config.RambleRepository.Update(dbRamble)
+		dbRamble, err = config.RambleRepository.Update(dbRamble, false)
 		if err != nil {
 			// Log the error but don't fail the creation
 			fmt.Printf("Failed to update ramble with file URLs: %v\n", err)
@@ -324,7 +324,37 @@ func (config *Config) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	dbRamble, err = config.RambleRepository.Update(dbRamble)
+	// Handle cover image upload if provided
+	if coverImageInterface, exists := data["cover_image_base64"]; exists {
+		if coverImageStr, ok := coverImageInterface.(string); ok && coverImageStr != "" {
+			rambleID := fmt.Sprintf("%d", dbRamble.ID)
+			filename, err := helper.SaveBase64Image(coverImageStr, config.Constants.DataPath, "ramble", rambleID)
+			if err != nil {
+				// Log the error but don't fail the update
+				fmt.Printf("Failed to save ramble cover image: %v\n", err)
+			} else {
+				// Update the ramble with the cover image filename
+				dbRamble.CoverImage = &filename
+			}
+		}
+	}
+
+	// Handle additional document upload if provided
+	if additionalDocInterface, exists := data["additional_document_base64"]; exists {
+		if additionalDocStr, ok := additionalDocInterface.(string); ok && additionalDocStr != "" {
+			rambleID := fmt.Sprintf("%d", dbRamble.ID)
+			filename, err := helper.SaveBase64Document(additionalDocStr, config.Constants.DataPath, "ramble", rambleID, "document_")
+			if err != nil {
+				// Log the error but don't fail the update
+				fmt.Printf("Failed to save ramble additional document: %v\n", err)
+			} else {
+				// Update the ramble with the additional document filename
+				dbRamble.AdditionalDocumentsURL = &filename
+			}
+		}
+	}
+
+	dbRamble, err = config.RambleRepository.Update(dbRamble, true)
 	if err != nil {
 		render.Render(w, r, errors.ErrServerError(err))
 		return

@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi"
 	"github.com/go-chi/render"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 // Authenticate godoc
@@ -59,6 +60,11 @@ func (config *Config) Authenticate(w http.ResponseWriter, r *http.Request) {
 				FirstName: *data.FirstName,
 				LastName:  data.LastName,
 				Phone:     data.Phone,
+			},
+			Roles: []dbmodel.Role{
+				dbmodel.Role{
+					Model: gorm.Model{ID: 2},
+				},
 			},
 		}
 

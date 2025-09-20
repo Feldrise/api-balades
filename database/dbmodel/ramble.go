@@ -99,7 +99,7 @@ type RambleRepository interface {
 	FindByID(id uint) (*Ramble, error)
 	FindAll(filter *RambleFilter) ([]Ramble, error)
 	Create(ramble *Ramble) (*Ramble, error)
-	Update(ramble *Ramble) (*Ramble, error)
+	Update(ramble *Ramble, updateAssociations bool) (*Ramble, error)
 	Delete(id uint) error
 }
 
@@ -199,26 +199,28 @@ func (r *rambleRepository) Create(ramble *Ramble) (*Ramble, error) {
 	return ramble, err
 }
 
-func (r *rambleRepository) Update(ramble *Ramble) (*Ramble, error) {
+func (r *rambleRepository) Update(ramble *Ramble, updateAssociations bool) (*Ramble, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Delete existing prices
-	err := r.db.WithContext(ctx).Model(&RamblePrice{}).
-		Where("ramble_id = ?", ramble.ID).
-		Delete(&RamblePrice{}).Error
+	// Delete existing prices and guides if updating associations
+	if updateAssociations {
+		err := r.db.Unscoped().WithContext(ctx).Model(&RamblePrice{}).
+			Where("ramble_id = ?", ramble.ID).
+			Delete(&RamblePrice{}).Error
 
-	err = r.db.WithContext(ctx).Model(&RambleGuide{}).
-		Where("ramble_id = ?", ramble.ID).
-		Delete(&RambleGuide{}).Error
+		err = r.db.Unscoped().WithContext(ctx).Model(&RambleGuide{}).
+			Where("ramble_id = ?", ramble.ID).
+			Delete(&RambleGuide{}).Error
 
-	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	tx := r.db.WithContext(ctx).Session(&gorm.Session{FullSaveAssociations: true})
+	tx := r.db.WithContext(ctx)
 
-	err = tx.Save(ramble).Error
+	err := tx.Save(ramble).Error
 
 	return ramble, err
 }

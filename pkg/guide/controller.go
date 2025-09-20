@@ -218,6 +218,21 @@ func (config *Config) Update(w http.ResponseWriter, r *http.Request) {
 
 	helper.ApplyChanges(data, dbGuide)
 
+	// Handle avatar upload if provided
+	if avatarInterface, exists := data["avatar_base64"]; exists {
+		if avatarStr, ok := avatarInterface.(string); ok && avatarStr != "" {
+			guideID := fmt.Sprintf("%d", dbGuide.ID)
+			filename, err := helper.SaveBase64Image(avatarStr, config.Constants.DataPath, "guide", guideID)
+			if err != nil {
+				// Log the error but don't fail the update
+				fmt.Printf("Failed to save guide avatar: %v\n", err)
+			} else {
+				// Update the guide with the avatar filename
+				dbGuide.Avatar = &filename
+			}
+		}
+	}
+
 	dbGuide, err = config.GuideRepository.Update(dbGuide)
 	if err != nil {
 		render.Render(w, r, errors.ErrServerError(err))

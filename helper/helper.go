@@ -6,8 +6,10 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/mitchellh/mapstructure"
@@ -35,7 +37,78 @@ func toCamelCase(input string) string {
 	return result
 }
 
-// ApplyChanges function to decode map into struct
+// Common time formats for parsing
+var timeFormats = []string{
+	time.RFC3339,               // "2006-01-02T15:04:05Z07:00"
+	time.RFC3339Nano,           // "2006-01-02T15:04:05.999999999Z07:00"
+	"2006-01-02T15:04:05",      // ISO format without timezone
+	"2006-01-02 15:04:05",      // Common database format
+	"2006-01-02T15:04:05.000Z", // JavaScript JSON format
+	"2006-01-02",               // Date only
+	"15:04:05",                 // Time only
+	"15:04",                    // Time without seconds
+}
+
+// ParseTime attempts to parse a time string using common formats
+func ParseTime(timeStr string) (time.Time, error) {
+	if timeStr == "" {
+		return time.Time{}, nil
+	}
+
+	for _, format := range timeFormats {
+		if t, err := time.Parse(format, timeStr); err == nil {
+			return t, nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("unable to parse time: %s", timeStr)
+}
+
+// FormatTime formats a time.Time to RFC3339 format
+func FormatTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(time.RFC3339)
+}
+
+// IsValidTimeString checks if a string can be parsed as a time
+func IsValidTimeString(timeStr string) bool {
+	_, err := ParseTime(timeStr)
+	return err == nil
+}
+
+// TimeToStartOfDay returns the time at the start of the day (00:00:00)
+func TimeToStartOfDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+}
+
+// TimeToEndOfDay returns the time at the end of the day (23:59:59.999999999)
+func TimeToEndOfDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 999999999, t.Location())
+}
+
+// stringToTimeHookFunc is a mapstructure decode hook that converts strings to time.Time
+func stringToTimeHookFunc() mapstructure.DecodeHookFunc {
+	return func(
+		f reflect.Type,
+		t reflect.Type,
+		data interface{}) (interface{}, error) {
+
+		if f.Kind() != reflect.String {
+			return data, nil
+		}
+
+		if t != reflect.TypeOf(time.Time{}) {
+			return data, nil
+		}
+
+		// Convert the string to time.Time
+		return ParseTime(data.(string))
+	}
+}
+
+// ApplyChanges function to decode map into struct with support for time.Time fields
 func ApplyChanges(changes map[string]interface{}, to interface{}) error {
 	camelCaseKeys := make(map[string]interface{})
 	for k, v := range changes {
@@ -47,6 +120,7 @@ func ApplyChanges(changes map[string]interface{}, to interface{}) error {
 		TagName:     "json",
 		Result:      to,
 		ZeroFields:  true,
+		DecodeHook:  stringToTimeHookFunc(),
 	})
 
 	if err != nil {

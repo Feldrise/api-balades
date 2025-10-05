@@ -273,6 +273,7 @@ func (config *Config) Cancel(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {array} model.RambleRegistration
 // @Failure 400 {object} errors.ErrResponse
 // @Failure 401 {object} errors.ErrResponse
+// @Failure 403 {object} errors.ErrResponse
 // @Failure 500 {object} errors.ErrResponse
 // @Router /registrations/ramble/{rambleId} [get]
 func (config *Config) GetRambleRegistrations(w http.ResponseWriter, r *http.Request) {
@@ -282,7 +283,11 @@ func (config *Config) GetRambleRegistrations(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// TODO: Add permission check for admin access
+	// Check if user has permission to view all registrations
+	if !user.HasPermission("view:all-registrations") {
+		render.Render(w, r, errors.ErrForbidden("insufficient permissions"))
+		return
+	}
 
 	rambleIdParam := chi.URLParam(r, "rambleId")
 	rambleId, err := strconv.Atoi(rambleIdParam)

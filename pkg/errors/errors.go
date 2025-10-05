@@ -54,3 +54,11 @@ func ErrUnauthorized(message string) render.Renderer {
 		ErrorText:      message,
 	}
 }
+
+func ErrForbidden(message string) render.Renderer {
+	return &ErrResponse{
+		HTTPStatusCode: 403,
+		StatusText:     message,
+		ErrorText:      message,
+	}
+}

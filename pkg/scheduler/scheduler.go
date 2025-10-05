@@ -47,6 +47,9 @@ func (s *RegistrationScheduler) StartScheduler() {
 		}
 	}()
 
+	s.processConfirmationRequests()
+	s.processUnconfirmedRegistrations()
+
 	log.Println("Registration scheduler started")
 }
 
@@ -82,6 +85,11 @@ func (s *RegistrationScheduler) processUnconfirmedRegistrations() {
 
 func (s *RegistrationScheduler) sendConfirmationRequest(registration *dbmodel.RambleRegistration) {
 	if registration.Ramble.Date == nil {
+		return
+	}
+
+	// Skip if ramble is cancelled
+	if registration.Ramble.IsCancelled {
 		return
 	}
 
@@ -154,6 +162,11 @@ func (s *RegistrationScheduler) promoteFromWaitingList(rambleID uint) {
 	// Get ramble details
 	ramble, err := s.rambleRepo.FindByID(rambleID)
 	if err != nil || ramble == nil {
+		return
+	}
+
+	// Skip if ramble is cancelled
+	if ramble.IsCancelled {
 		return
 	}
 

@@ -25,6 +25,8 @@ type RambleRegistration struct {
 	RambleID uint  `json:"ramble_id"`
 	UserID   *uint `json:"user_id,omitempty"`
 	GroupID  *uint `json:"group_id,omitempty"`
+
+	Ramble *RambleRegistrationSummary `json:"ramble,omitempty"`
 } // @name RambleRegistration
 
 type RambleRegistrationGroup struct {
@@ -43,6 +45,12 @@ type RambleRegistrationGroup struct {
 	Registrations        []*RambleRegistration `json:"registrations"`
 	ParticipantCount     int                   `json:"participant_count"`
 } // @name RambleRegistrationGroup
+
+type RambleRegistrationSummary struct {
+	Title    string     `json:"title"`
+	Date     *time.Time `json:"date"`
+	Location *string    `json:"location"`
+} // @name RambleRegistrationSummary
 
 type ParticipantInfo struct {
 	FirstName string  `json:"first_name"`

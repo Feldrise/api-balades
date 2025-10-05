@@ -16,6 +16,7 @@ func (config *Config) Routes() *chi.Mux {
 	router.Get("/", config.GetAll)
 	router.Post("/", config.Create)
 	router.Put("/{id}", config.Update)
+	router.Put("/{id}/cancel", config.Cancel)
 	router.Delete("/{id}", config.Delete)
 
 	return router

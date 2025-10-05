@@ -43,6 +43,12 @@ func (config *Config) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if ramble is cancelled
+	if ramble.IsCancelled {
+		render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("cannot register for a cancelled ramble")))
+		return
+	}
+
 	// If it's a group registration (multiple participants)
 	if len(data.Participants) > 1 {
 		registration, err := config.createGroupRegistration(data, ramble)

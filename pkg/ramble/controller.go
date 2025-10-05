@@ -12,6 +12,7 @@ import (
 	"feldrise.com/balade/pkg/authentication"
 	"feldrise.com/balade/pkg/errors"
 	"feldrise.com/balade/pkg/model"
+	"feldrise.com/balade/pkg/notifications/email"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/render"
 	"gorm.io/gorm"
@@ -57,7 +58,7 @@ func (config *Config) Get(w http.ResponseWriter, r *http.Request) {
 // @Summary Get all Rambles
 // @Description Get all rambles with optional filters
 // @ID get-all-rambles
-// @Param status query string false "Filter by status (e.g., 'active', 'archived')"
+// @Param is_cancelled query boolean false "Filter by cancellation status"
 // @Param type query string false "Filter by ramble type"
 // @Param difficulty query string false "Filter by difficulty level"
 // @Param location query string false "Filter by location (partial match)"
@@ -65,7 +66,6 @@ func (config *Config) Get(w http.ResponseWriter, r *http.Request) {
 // @Param date_from query string false "Filter rambles from this date (RFC3339 format)"
 // @Param date_to query string false "Filter rambles to this date (RFC3339 format)"
 // @Param guide_id query int false "Filter rambles by specific guide ID"
-// @Param is_active query boolean false "Filter by active status (non-archived rambles)"
 // @Success 200 {array} Ramble
 // @Failure 400 {string} string "bad request"
 // @Failure 401 {string} string "unauthorized"
@@ -79,8 +79,13 @@ func (config *Config) GetAll(w http.ResponseWriter, r *http.Request) {
 	if len(queryParams) > 0 {
 		filter = &dbmodel.RambleFilter{}
 
-		if status := queryParams.Get("status"); status != "" {
-			filter.Status = &status
+		if isCancelledStr := queryParams.Get("is_cancelled"); isCancelledStr != "" {
+			if isCancelled, err := strconv.ParseBool(isCancelledStr); err == nil {
+				filter.IsCancelled = &isCancelled
+			} else {
+				render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("invalid is_cancelled value: %s", isCancelledStr)))
+				return
+			}
 		}
 
 		if rambleType := queryParams.Get("type"); rambleType != "" {
@@ -123,15 +128,6 @@ func (config *Config) GetAll(w http.ResponseWriter, r *http.Request) {
 				filter.GuideID = &guideIDUint
 			} else {
 				render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("invalid guide_id: %s", guideIDStr)))
-				return
-			}
-		}
-
-		if isActiveStr := queryParams.Get("is_active"); isActiveStr != "" {
-			if isActive, err := strconv.ParseBool(isActiveStr); err == nil {
-				filter.IsActive = &isActive
-			} else {
-				render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("invalid is_active value: %s", isActiveStr)))
 				return
 			}
 		}
@@ -408,4 +404,143 @@ func (config *Config) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	render.NoContent(w, r)
+}
+
+// Cancel godoc
+// @Summary Cancel a ramble
+// @Description Cancel a ramble with a reason
+// @ID cancel-ramble
+// @Accept json
+// @Produce json
+// @Param id path int true "Ramble ID"
+// @Param payload body model.RambleCancelPayload true "Cancellation data"
+// @Success 200 {object} model.Ramble
+// @Failure 400 {string} string "bad request"
+// @Failure 401 {string} string "unauthorized"
+// @Failure 404 {string} string "not found"
+// @Failure 500 {string} string "internal server error"
+// @Router /rambles/{id}/cancel [put]
+func (config *Config) Cancel(w http.ResponseWriter, r *http.Request) {
+	loggedUser := authentication.ForContext(r.Context())
+
+	if loggedUser == nil {
+		render.Render(w, r, errors.ErrUnauthorized("You must be logged in to access this resource"))
+		return
+	}
+
+	id := chi.URLParam(r, "id")
+
+	// Convert id to uint
+	idUint, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return
+	}
+
+	var payload model.RambleCancelPayload
+	if err := render.Bind(r, &payload); err != nil {
+		render.Render(w, r, errors.ErrInvalidRequest(err))
+		return
+	}
+
+	dbRamble, err := config.RambleRepository.FindByID(uint(idUint))
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return
+	}
+
+	if dbRamble == nil {
+		render.Render(w, r, errors.ErrNotFound())
+		return
+	}
+
+	if dbRamble.IsCancelled {
+		render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("ramble is already cancelled")))
+		return
+	}
+
+	// Cancel the ramble
+	now := time.Now()
+	dbRamble.IsCancelled = true
+	dbRamble.CancellationDate = &now
+	dbRamble.CancellationReason = payload.Reason
+
+	dbRamble, err = config.RambleRepository.Update(dbRamble, false)
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return
+	}
+
+	// Send cancellation emails to all registered participants
+	go config.sendCancellationEmails(dbRamble)
+
+	render.JSON(w, r, dbRamble.ToModel())
+}
+
+// sendCancellationEmails sends cancellation notifications to all registered participants
+func (config *Config) sendCancellationEmails(ramble *dbmodel.Ramble) {
+	// Get all active registrations for this ramble
+	filter := &dbmodel.RambleRegistrationFilter{
+		RambleID: &ramble.ID,
+	}
+
+	registrations, err := config.RambleRegistrationRepository.FindAll(filter)
+	if err != nil {
+		fmt.Printf("Failed to get registrations for cancellation emails: %v\n", err)
+		return
+	}
+
+	// Send email to each registered participant (excluding already cancelled ones)
+	for _, registration := range registrations {
+		if registration.Status != "cancelled" {
+			config.sendCancellationEmail(&registration, ramble)
+		}
+	}
+}
+
+// sendCancellationEmail sends a cancellation email to a single participant
+func (config *Config) sendCancellationEmail(registration *dbmodel.RambleRegistration, ramble *dbmodel.Ramble) {
+	data := email.RambleCancellationData{
+		FirstName:          registration.FirstName,
+		LastName:           registration.LastName,
+		Title:              ramble.Title,
+		Date:               formatDate(ramble.Date),
+		Location:           formatLocation(ramble.Location),
+		CancellationReason: formatCancellationReason(ramble.CancellationReason),
+	}
+
+	err := config.EmailService.Send(
+		registration.Email,
+		"Annulation de balade - Balade Écologique",
+		"ramble_cancellation",
+		data,
+	)
+
+	if err != nil {
+		fmt.Printf("Failed to send cancellation email to %s: %v\n", registration.Email, err)
+	} else {
+		fmt.Printf("Sent cancellation email to %s for ramble: %s\n", registration.Email, ramble.Title)
+	}
+}
+
+// Helper functions for email formatting
+func formatDate(date *time.Time) string {
+	if date == nil {
+		return "Date à confirmer"
+	}
+	return date.Format("2 January 2006 à 15:04")
+}
+
+func formatLocation(location *string) string {
+	if location == nil {
+		return "Lieu à confirmer"
+	}
+	return *location
+}
+
+func formatCancellationReason(reason *string) string {
+	if reason == nil {
+		return "Aucune raison spécifiée"
+	}
+	return *reason
 }

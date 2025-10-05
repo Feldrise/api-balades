@@ -17,7 +17,6 @@ type Ramble struct {
 	UpdatedAt time.Time `json:"updated_at"`
 
 	Title                  string        `json:"title"`
-	Status                 string        `json:"status"`
 	Description            *string       `json:"description,omitempty"`
 	Type                   string        `json:"type"`
 	Date                   *time.Time    `json:"date,omitempty"`
@@ -31,6 +30,9 @@ type Ramble struct {
 	Prerequisites          *string       `json:"prerequisites,omitempty"`
 	CoverImage             *string       `json:"cover_image,omitempty"`
 	AdditionalDocumentsURL *string       `json:"additional_documents_url,omitempty"`
+	IsCancelled            bool          `json:"is_cancelled"`
+	CancellationDate       *time.Time    `json:"cancellation_date,omitempty"`
+	CancellationReason     *string       `json:"cancellation_reason,omitempty"`
 	Guides                 []Guide       `json:"guides,omitempty"`
 	PlacesLeft             *int          `json:"places_left,omitempty"`
 } // @name Ramble
@@ -68,6 +70,18 @@ func (rb *RambleCreatePayload) Bind(r *http.Request) error {
 
 	if len(rb.Prices) == 0 {
 		return errors.New("at least one price is required")
+	}
+
+	return nil
+}
+
+type RambleCancelPayload struct {
+	Reason *string `json:"reason" binding:"required"`
+} // @name RambleCancelPayload
+
+func (rc *RambleCancelPayload) Bind(r *http.Request) error {
+	if rc.Reason == nil || *rc.Reason == "" {
+		return errors.New("cancellation reason is required")
 	}
 
 	return nil

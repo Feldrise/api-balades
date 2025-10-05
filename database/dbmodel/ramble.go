@@ -25,7 +25,6 @@ type Ramble struct {
 	gorm.Model
 
 	Title                  string `gorm:"not null"`
-	Status                 string `gorm:"not null"`
 	Description            *string
 	Type                   string `gorm:"not null;default:'Découverte générale'"`
 	Date                   *time.Time
@@ -38,6 +37,11 @@ type Ramble struct {
 	Prerequisites          *string
 	CoverImage             *string
 	AdditionalDocumentsURL *string
+
+	// Cancellation fields
+	IsCancelled        bool `gorm:"not null;default:false"`
+	CancellationDate   *time.Time
+	CancellationReason *string
 
 	// Many-to-many relationship with guides
 	Guides []Guide `gorm:"many2many:ramble_guides;"`
@@ -92,7 +96,6 @@ func (rm Ramble) ToModel() model.Ramble {
 		CreatedAt:              rm.CreatedAt,
 		UpdatedAt:              rm.UpdatedAt,
 		Title:                  rm.Title,
-		Status:                 rm.Status,
 		Description:            rm.Description,
 		Type:                   rm.Type,
 		Date:                   rm.Date,
@@ -106,21 +109,23 @@ func (rm Ramble) ToModel() model.Ramble {
 		Prerequisites:          rm.Prerequisites,
 		CoverImage:             rm.CoverImage,
 		AdditionalDocumentsURL: rm.AdditionalDocumentsURL,
+		IsCancelled:            rm.IsCancelled,
+		CancellationDate:       rm.CancellationDate,
+		CancellationReason:     rm.CancellationReason,
 		Guides:                 guides,
 		PlacesLeft:             rm.PlacesLeft,
 	}
 }
 
 type RambleFilter struct {
-	Status     *string
-	Type       *string
-	Difficulty *string
-	Location   *string
-	Search     *string    // Search in title, description, location
-	DateFrom   *time.Time // Filter rambles from this date
-	DateTo     *time.Time // Filter rambles to this date
-	GuideID    *uint      // Filter rambles by specific guide
-	IsActive   *bool      // Filter by active status (non-archived)
+	IsCancelled *bool // Filter by cancellation status
+	Type        *string
+	Difficulty  *string
+	Location    *string
+	Search      *string    // Search in title, description, location
+	DateFrom    *time.Time // Filter rambles from this date
+	DateTo      *time.Time // Filter rambles to this date
+	GuideID     *uint      // Filter rambles by specific guide
 }
 
 type RambleRepository interface {
@@ -168,8 +173,8 @@ func (r *rambleRepository) FindAll(filter *RambleFilter) ([]Ramble, error) {
 	tx := r.db.WithContext(ctx).Model(&Ramble{})
 
 	if filter != nil {
-		if filter.Status != nil {
-			tx = tx.Where("status = ?", *filter.Status)
+		if filter.IsCancelled != nil {
+			tx = tx.Where("is_cancelled = ?", *filter.IsCancelled)
 		}
 
 		if filter.Type != nil {
@@ -201,14 +206,6 @@ func (r *rambleRepository) FindAll(filter *RambleFilter) ([]Ramble, error) {
 			tx = tx.Joins("JOIN ramble_guides ON rambles.id = ramble_guides.ramble_id").
 				Where("ramble_guides.guide_id = ?", *filter.GuideID)
 		}
-
-		if filter.IsActive != nil {
-			if *filter.IsActive {
-				tx = tx.Where("status != ?", "archived")
-			} else {
-				tx = tx.Where("status = ?", "archived")
-			}
-		}
 	}
 
 	tx = tx.Preload("Prices").Preload("Guides").Preload("Registrations")
@@ -232,14 +229,20 @@ func (r *rambleRepository) Update(ramble *Ramble, updateAssociations bool) (*Ram
 	defer cancel()
 
 	// Delete existing prices and guides if updating associations
-	if updateAssociations {
-		err := r.db.Unscoped().WithContext(ctx).Model(&RamblePrice{}).
-			Where("ramble_id = ?", ramble.ID).
-			Delete(&RamblePrice{}).Error
+	if updateAssociations || len(ramble.Prices) > 0 || len(ramble.Guides) > 0 {
+		var err error
 
-		err = r.db.Unscoped().WithContext(ctx).Model(&RambleGuide{}).
-			Where("ramble_id = ?", ramble.ID).
-			Delete(&RambleGuide{}).Error
+		if updateAssociations || len(ramble.Prices) > 0 {
+			err = r.db.Unscoped().WithContext(ctx).Model(&RamblePrice{}).
+				Where("ramble_id = ?", ramble.ID).
+				Delete(&RamblePrice{}).Error
+		}
+
+		if updateAssociations || len(ramble.Guides) > 0 {
+			err = r.db.Unscoped().WithContext(ctx).Model(&RambleGuide{}).
+				Where("ramble_id = ?", ramble.ID).
+				Delete(&RambleGuide{}).Error
+		}
 
 		if err != nil {
 			return nil, err

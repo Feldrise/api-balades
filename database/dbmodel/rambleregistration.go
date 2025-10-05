@@ -38,7 +38,9 @@ type RambleRegistration struct {
 }
 
 func (rr *RambleRegistration) ToModel() *model.RambleRegistration {
-	return &model.RambleRegistration{
+	ramble := rr.Ramble
+
+	rrModel := &model.RambleRegistration{
 		ID:                   rr.ID,
 		CreatedAt:            rr.CreatedAt,
 		UpdatedAt:            rr.UpdatedAt,
@@ -56,6 +58,16 @@ func (rr *RambleRegistration) ToModel() *model.RambleRegistration {
 		UserID:               rr.UserID,
 		GroupID:              rr.GroupID,
 	}
+
+	if ramble.ID != 0 {
+		rrModel.Ramble = &model.RambleRegistrationSummary{
+			Title:    ramble.Title,
+			Date:     ramble.Date,
+			Location: ramble.Location,
+		}
+	}
+
+	return rrModel
 }
 
 type RambleRegistrationFilter struct {
@@ -128,6 +140,8 @@ func (r *rambleRegistrationRepository) FindAll(filter *RambleRegistrationFilter)
 			tx = tx.Where("group_id = ?", *filter.GroupID)
 		}
 	}
+
+	tx = tx.Order("created_at DESC")
 
 	err := tx.Preload("Ramble").Preload("User").Find(&registrations).Error
 	return registrations, err

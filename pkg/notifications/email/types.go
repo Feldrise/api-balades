@@ -38,6 +38,15 @@ type SpotAvailableData struct {
 	Location  string
 }
 
+type RambleCancellationData struct {
+	FirstName          string
+	LastName           string
+	Title              string
+	Date               string
+	Location           string
+	CancellationReason string
+}
+
 // Service
 
 type Credentials struct {

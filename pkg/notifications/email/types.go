@@ -27,7 +27,7 @@ type EventConfirmationRequestData struct {
 	Date                 string
 	Location             string
 	ConfirmationDeadline string
-	ConfirmationURL      string
+	ReservationURL       string
 }
 
 type SpotAvailableData struct {

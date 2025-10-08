@@ -104,8 +104,8 @@ func (s *RegistrationScheduler) sendConfirmationRequest(registration *dbmodel.Ra
 		return
 	}
 
-	// Build confirmation URL
-	confirmationURL := fmt.Sprintf("%s/registrations/%d/confirm", s.applicationURL, registration.ID)
+	// Build reservation URL
+	reservationURL := fmt.Sprintf("%s/mes-reservations", s.applicationURL)
 
 	// Send confirmation email
 	data := email.EventConfirmationRequestData{
@@ -115,7 +115,7 @@ func (s *RegistrationScheduler) sendConfirmationRequest(registration *dbmodel.Ra
 		Date:                 formatDate(registration.Ramble.Date),
 		Location:             formatLocation(registration.Ramble.Location),
 		ConfirmationDeadline: confirmationDeadline.Format("2 January 2006 à 15:04"),
-		ConfirmationURL:      confirmationURL,
+		ReservationURL:       reservationURL,
 	}
 
 	err = s.emailService.Send(

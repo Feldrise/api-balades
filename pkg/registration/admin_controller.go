@@ -573,8 +573,33 @@ func (config *Config) updateRegistrationStatus(registration *dbmodel.RambleRegis
 		return fmt.Errorf("invalid status: %s", newStatus)
 	}
 
-	// TODO: Send email notification if sendEmail is true
-	// This would require implementing admin-specific email templates
+	// Send email notification if sendEmail is true and status is confirmed
+	if sendEmail && newStatus == "confirmed" {
+		go config.sendAdminConfirmationEmail(registration)
+	}
 
 	return nil
+}
+
+// sendAdminConfirmationEmail sends a confirmation email when admin confirms a registration
+func (config *Config) sendAdminConfirmationEmail(registration *dbmodel.RambleRegistration) {
+	// Load the ramble with all necessary data
+	ramble, err := config.RambleRepository.FindByID(registration.RambleID)
+	if err != nil || ramble == nil {
+		fmt.Printf("Failed to load ramble for admin confirmation email: %v\n", err)
+		return
+	}
+
+	// Check if this is a group registration
+	if registration.GroupID != nil {
+		// Load the group
+		group, err := config.RambleRegistrationGroupRepository.FindByID(*registration.GroupID)
+		if err != nil || group == nil {
+			fmt.Printf("Failed to load group for admin confirmation email: %v\n", err)
+			return
+		}
+		config.sendGroupRegistrationConfirmationEmail(registration, ramble, group)
+	} else {
+		config.sendRegistrationConfirmationEmail(registration, ramble)
+	}
 }

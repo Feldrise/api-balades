@@ -168,6 +168,76 @@
                             </table>
                         </td>
                     </tr>
+                    <!-- PAYMENT INFORMATION -->
+                    {{if .PaymentEnabled}}
+                    {{if ne .Status "waiting_list"}}
+                    <tr>
+                        <td bgcolor="#ffffff" align="left">
+                            <table width="100%" border="0" cellspacing="0" cellpadding="0">
+                                <tr>
+                                    <td bgcolor="#ffffff" align="center" style="padding: 0px 30px 20px 30px;">
+                                        <table border="0" cellspacing="0" cellpadding="0" style="width: 100%;">
+                                            <tr>
+                                                <td align="left"
+                                                    style="border-radius: 3px; background-color: #e6f7ef; border-left: 4px solid #5ABA84; padding: 20px;">
+                                                    <h3
+                                                        style="font-size: 20px; font-family: 'Lato', Helvetica, Arial, sans-serif; color: #111111; margin: 0 0 15px 0; font-weight: 700;">
+                                                        💳 Paiement en ligne disponible
+                                                    </h3>
+                                                    {{if .PaymentRequired}}
+                                                    <p
+                                                        style="font-size: 16px; font-family: 'Lato', Helvetica, Arial, sans-serif; color: #666666; margin: 0 0 15px 0;">
+                                                        Le paiement est <strong>obligatoire</strong> pour cette balade.
+                                                    </p>
+                                                    {{else}}
+                                                    <p
+                                                        style="font-size: 16px; font-family: 'Lato', Helvetica, Arial, sans-serif; color: #666666; margin: 0 0 15px 0;">
+                                                        Le paiement en ligne est disponible pour cette balade
+                                                        (optionnel).
+                                                        {{if ne .Status "confirmed"}}
+                                                        Il sera disponible une fois votre inscription confirmée.
+                                                        {{end}}
+                                                    </p>
+                                                    {{end}}
+                                                    {{if .Prices}}
+                                                    <p
+                                                        style="font-size: 16px; font-family: 'Lato', Helvetica, Arial, sans-serif; color: #666666; margin: 0 0 10px 0;">
+                                                        <strong>Tarifs disponibles :</strong>
+                                                    </p>
+                                                    <ul style="margin: 0 0 15px 0; padding-left: 20px;">
+                                                        {{range .Prices}}
+                                                        <li
+                                                            style="font-size: 16px; font-family: 'Lato', Helvetica, Arial, sans-serif; color: #666666; margin: 5px 0;">
+                                                            {{.Label}} : {{printf "%.2f" .Amount}} €
+                                                        </li>
+                                                        {{end}}
+                                                    </ul>
+                                                    {{end}}
+                                                    {{if .PaymentURL}}
+                                                    {{if eq .Status "confirmed"}}
+                                                    <table border="0" cellspacing="0" cellpadding="0">
+                                                        <tr>
+                                                            <td align="center" style="border-radius: 3px;"
+                                                                bgcolor="#5ABA84">
+                                                                <a href="{{.PaymentURL}}" target="_blank"
+                                                                    style="font-size: 18px; font-family: 'Lato', Helvetica, Arial, sans-serif; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 3px; border: 1px solid #5ABA84; display: inline-block; font-weight: 600;">
+                                                                    Payer en ligne
+                                                                </a>
+                                                            </td>
+                                                        </tr>
+                                                    </table>
+                                                    {{end}}
+                                                    {{end}}
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    {{end}}
+                    {{end}}
                     <!-- FINAL MESSAGE -->
                     <tr>
                         <td bgcolor="#ffffff" align="left"
@@ -175,17 +245,34 @@
                             {{if eq .Status "waiting_list"}}
                             <p style="margin: 0 0 15px 0;">Votre inscription a été placée sur liste d'attente car la
                                 balade est complète. Nous vous contacterons si une place se libère.</p>
+                            {{else if eq .Status "confirmed"}}
+                            {{if .IsGroup}}
+                            <p style="margin: 0 0 15px 0;">Votre inscription de groupe est maintenant
+                                <strong>confirmée</strong>. Nous avons hâte de vous accueillir pour cette belle
+                                découverte de la nature !
+                            </p>
+                            {{else}}
+                            <p style="margin: 0 0 15px 0;">Votre inscription est maintenant <strong>confirmée</strong>.
+                                Nous avons hâte de vous accueillir pour cette belle découverte de la nature !</p>
+                            {{end}}
                             {{else}}
                             {{if .IsGroup}}
-                            <p style="margin: 0 0 15px 0;">Votre inscription de groupe est maintenant confirmée. Vous
-                                recevrez une demande de confirmation finale 3 jours avant la balade.</p>
+                            <p style="margin: 0 0 15px 0;">Votre inscription de groupe a bien été enregistrée avec le
+                                statut <strong>en attente</strong>. Vous recevrez une demande de confirmation finale 3
+                                jours avant la balade.</p>
                             {{else}}
-                            <p style="margin: 0 0 15px 0;">Votre inscription est maintenant confirmée. Vous recevrez une
-                                demande de confirmation finale 3 jours avant la balade.</p>
+                            <p style="margin: 0 0 15px 0;">Votre inscription a bien été enregistrée avec le statut
+                                <strong>en attente</strong>. Vous recevrez une demande de confirmation finale 3 jours
+                                avant la balade.
+                            </p>
                             {{end}}
                             {{end}}
-                            <p style="margin: 0 0 15px 0;">Nous avons hâte de vous rencontrer pour cette belle
-                                découverte de la nature !</p>
+                            {{if and .PaymentEnabled (ne .Status "waiting_list")}}
+                            {{if .PaymentRequired}}
+                            <p style="margin: 0 0 15px 0;">N'oubliez pas de régler votre participation en ligne pour
+                                finaliser votre inscription.</p>
+                            {{end}}
+                            {{end}}
                             <p style="margin: 0;">À bientôt,<br>L'équipe Balade Écologique</p>
                         </td>
                     </tr>

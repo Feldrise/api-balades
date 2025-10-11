@@ -18,6 +18,16 @@ type RegistrationConfirmationData struct {
 	IsGroup          bool
 	ParticipantCount int
 	ParticipantNames []string
+	// Payment information
+	PaymentEnabled  bool
+	PaymentRequired bool
+	PaymentURL      string
+	Prices          []PriceInfo
+}
+
+type PriceInfo struct {
+	Label  string
+	Amount float64
 }
 
 type EventConfirmationRequestData struct {

@@ -346,6 +346,21 @@ func (config *Config) findOrCreateUser(email, firstName, lastName string, phone 
 }
 
 func (config *Config) sendRegistrationConfirmationEmail(registration *dbmodel.RambleRegistration, ramble *dbmodel.Ramble) {
+	// Build price information
+	prices := make([]email.PriceInfo, len(ramble.Prices))
+	for i, price := range ramble.Prices {
+		prices[i] = email.PriceInfo{
+			Label:  price.Label,
+			Amount: price.Amount,
+		}
+	}
+
+	// Build payment URL if payment is enabled
+	paymentURL := ""
+	if ramble.PaymentEnabled && registration.ID > 0 {
+		paymentURL = fmt.Sprintf("%s/mes-reservations", config.ApplicationURL)
+	}
+
 	data := email.RegistrationConfirmationData{
 		FirstName:        registration.FirstName,
 		LastName:         registration.LastName,
@@ -356,6 +371,10 @@ func (config *Config) sendRegistrationConfirmationEmail(registration *dbmodel.Ra
 		IsGroup:          false,
 		ParticipantCount: 1,
 		ParticipantNames: []string{registration.FirstName + " " + registration.LastName},
+		PaymentEnabled:   ramble.PaymentEnabled,
+		PaymentRequired:  ramble.PaymentRequired,
+		PaymentURL:       paymentURL,
+		Prices:           prices,
 	}
 
 	err := config.EmailService.Send(
@@ -476,10 +495,27 @@ func (config *Config) createSingleRegistration(data *model.RambleRegistrationCre
 	}
 
 	status := "pending"
+	var confirmationDate *time.Time = nil
+
+	// Check if ramble is full
+	isFull := false
 	if ramble.MaxParticipants != nil {
 		totalRegistered := confirmedCount + pendingCount
 		if totalRegistered >= int64(*ramble.MaxParticipants) {
 			status = "waiting_list"
+			isFull = true
+		}
+	}
+
+	// Auto-confirm if registration is made within confirmation period and ramble is not full
+	if !isFull && ramble.Date != nil && !ramble.IsCancelled {
+		daysUntilRamble := time.Until(*ramble.Date).Hours() / 24
+		confirmationPeriod := 3.0 // Default to 3 days
+
+		if daysUntilRamble <= confirmationPeriod && daysUntilRamble >= 0 {
+			status = "confirmed"
+			now := time.Now()
+			confirmationDate = &now
 		}
 	}
 
@@ -491,6 +527,7 @@ func (config *Config) createSingleRegistration(data *model.RambleRegistrationCre
 		Phone:            participant.Phone,
 		Status:           status,
 		RegistrationDate: time.Now(),
+		ConfirmationDate: confirmationDate,
 		RambleID:         data.RambleID,
 		UserID:           &user.ID,
 	}
@@ -536,10 +573,27 @@ func (config *Config) createGroupRegistration(data *model.RambleRegistrationCrea
 
 	groupSize := len(data.Participants)
 	status := "pending"
+	var confirmationDate *time.Time = nil
+
+	// Check if ramble is full for the entire group
+	isFull := false
 	if ramble.MaxParticipants != nil {
 		totalRegistered := confirmedCount + pendingCount
 		if totalRegistered+int64(groupSize) > int64(*ramble.MaxParticipants) {
 			status = "waiting_list"
+			isFull = true
+		}
+	}
+
+	// Auto-confirm if registration is made within confirmation period and ramble has space
+	if !isFull && ramble.Date != nil && !ramble.IsCancelled {
+		daysUntilRamble := time.Until(*ramble.Date).Hours() / 24
+		confirmationPeriod := 3.0 // Default to 3 days
+
+		if daysUntilRamble <= confirmationPeriod && daysUntilRamble >= 0 {
+			status = "confirmed"
+			now := time.Now()
+			confirmationDate = &now
 		}
 	}
 
@@ -573,6 +627,7 @@ func (config *Config) createGroupRegistration(data *model.RambleRegistrationCrea
 			Phone:            participant.Phone,
 			Status:           status,
 			RegistrationDate: time.Now(),
+			ConfirmationDate: confirmationDate,
 			RambleID:         data.RambleID,
 			UserID:           &user.ID,
 			GroupID:          &createdGroup.ID,
@@ -612,6 +667,21 @@ func (config *Config) sendGroupRegistrationConfirmationEmail(registration *dbmod
 		participantNames[i] = p.FirstName + " " + p.LastName
 	}
 
+	// Build price information
+	prices := make([]email.PriceInfo, len(ramble.Prices))
+	for i, price := range ramble.Prices {
+		prices[i] = email.PriceInfo{
+			Label:  price.Label,
+			Amount: price.Amount,
+		}
+	}
+
+	// Build payment URL if payment is enabled
+	paymentURL := ""
+	if ramble.PaymentEnabled && registration.ID > 0 {
+		paymentURL = fmt.Sprintf("%s/mes-reservations", config.ApplicationURL)
+	}
+
 	data := email.RegistrationConfirmationData{
 		FirstName:        registration.FirstName,
 		LastName:         registration.LastName,
@@ -622,6 +692,10 @@ func (config *Config) sendGroupRegistrationConfirmationEmail(registration *dbmod
 		IsGroup:          true,
 		ParticipantCount: len(participants),
 		ParticipantNames: participantNames,
+		PaymentEnabled:   ramble.PaymentEnabled,
+		PaymentRequired:  ramble.PaymentRequired,
+		PaymentURL:       paymentURL,
+		Prices:           prices,
 	}
 
 	config.EmailService.Send(

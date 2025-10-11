@@ -176,6 +176,17 @@ func (config *Config) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isPaymentEnable := false
+	isPaymentRequired := false
+
+	if payload.PaymentEnabled != nil {
+		isPaymentEnable = *payload.PaymentEnabled
+	}
+
+	if payload.PaymentRequired != nil {
+		isPaymentRequired = *payload.PaymentRequired
+	}
+
 	dbRamble := &dbmodel.Ramble{
 		Title:             *payload.Title,
 		Description:       payload.Description,
@@ -188,6 +199,9 @@ func (config *Config) Create(w http.ResponseWriter, r *http.Request) {
 		EstimatedDuration: payload.EstimatedDuration,
 		EquipmentNeeded:   payload.EquipmentNeeded,
 		Prerequisites:     payload.Prerequisites,
+		PaymentEnabled:    isPaymentEnable,
+		PaymentRequired:   isPaymentRequired,
+		PaymentGuideID:    payload.PaymentGuideID,
 		Prices:            make([]dbmodel.RamblePrice, len(payload.Prices)),
 	}
 

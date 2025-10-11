@@ -17,6 +17,7 @@ func (config *Config) Routes() *chi.Mux {
 	router.Post("/", config.Create)
 	router.Put("/{id}", config.Update)
 	router.Delete("/{id}", config.Delete)
+	router.Put("/{id}/payment-config", config.UpdatePaymentConfig)
 
 	return router
 }

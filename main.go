@@ -8,6 +8,7 @@ import (
 	_ "feldrise.com/balade/docs"
 	"feldrise.com/balade/pkg/authentication"
 	"feldrise.com/balade/pkg/guide"
+	"feldrise.com/balade/pkg/payment"
 	"feldrise.com/balade/pkg/ramble"
 	"feldrise.com/balade/pkg/registration"
 	"feldrise.com/balade/pkg/scheduler"
@@ -40,6 +41,7 @@ func Routes(configuration *config.Config) *chi.Mux {
 		r.Mount("/guides", guide.New(configuration).Routes())
 		r.Mount("/rambles", ramble.New(configuration).Routes())
 		r.Mount("/registrations", registration.New(configuration).Routes())
+		r.Mount("/payments", payment.Routes(configuration.PaymentService))
 	})
 
 	fs := http.FileServer(http.Dir(configuration.Constants.DataPath + "/uploads"))

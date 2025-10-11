@@ -23,6 +23,7 @@ func Migrate(database *gorm.DB) {
 		&dbmodel.RambleGuide{},
 		&dbmodel.RambleRegistrationGroup{},
 		&dbmodel.RambleRegistration{},
+		&dbmodel.Payment{},
 	)
 
 	log.Println("Database migrated")
@@ -39,6 +40,7 @@ func ApplySeeds(database *gorm.DB) {
 		{"SeedV2", seed.SeedV2},
 		{"SeedV3", seed.SeedV3},
 		{"SeedV4", seed.SeedV4},
+		{"SeedV5", seed.SeedV5},
 	}
 
 	for _, seedToApply := range seedsToApply {

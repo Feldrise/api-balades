@@ -11,6 +11,7 @@ import (
 	"feldrise.com/balade/pkg/authentication"
 	"feldrise.com/balade/pkg/errors"
 	"feldrise.com/balade/pkg/model"
+	"feldrise.com/balade/pkg/security"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/render"
 )
@@ -287,4 +288,97 @@ func (config *Config) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	render.NoContent(w, r)
+}
+
+// UpdatePaymentConfig godoc
+// @Summary Update payment configuration for a guide
+// @Description Update payment configuration for a guide including Stripe credentials
+// @ID update-guide-payment-config
+// @Accept json
+// @Produce json
+// @Param id path int true "Guide ID"
+// @Param config body model.GuidePaymentConfigPayload true "Payment configuration"
+// @Success 200 {object} map[string]string
+// @Failure 400 {string} string "bad request"
+// @Failure 401 {string} string "unauthorized"
+// @Failure 404 {string} string "not found"
+// @Failure 500 {string} string "internal server error"
+// @Router /guides/{id}/payment-config [put]
+func (config *Config) UpdatePaymentConfig(w http.ResponseWriter, r *http.Request) {
+	loggedUser := authentication.ForContext(r.Context())
+
+	if loggedUser == nil {
+		render.Render(w, r, errors.ErrUnauthorized("You must be logged in to access this resource"))
+		return
+	}
+
+	id := chi.URLParam(r, "id")
+
+	// Convert id to uint
+	idUint, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return
+	}
+
+	var payload model.GuidePaymentConfigPayload
+	if err := render.Decode(r, &payload); err != nil {
+		render.Render(w, r, errors.ErrInvalidRequest(err))
+		return
+	}
+
+	dbGuide, err := config.GuideRepository.FindByID(uint(idUint))
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return
+	}
+
+	if dbGuide == nil {
+		render.Render(w, r, errors.ErrNotFound())
+		return
+	}
+
+	// Initialize encryption service
+	encryptionService := security.NewEncryptionService(config.Constants.JWTSecret)
+
+	// Update payment configuration
+	if payload.StripeAccountID != nil {
+		dbGuide.StripeAccountID = payload.StripeAccountID
+	}
+
+	if payload.StripePublicKey != nil {
+		dbGuide.StripePublicKey = payload.StripePublicKey
+	}
+
+	if payload.StripeSecretKey != nil && *payload.StripeSecretKey != "" {
+		// Encrypt the secret key before storing
+		encryptedSecretKey, err := encryptionService.Encrypt(*payload.StripeSecretKey)
+		if err != nil {
+			render.Render(w, r, errors.ErrServerError(fmt.Errorf("failed to encrypt secret key: %w", err)))
+			return
+		}
+		dbGuide.StripeSecretKey = &encryptedSecretKey
+	}
+
+	if payload.StripeWebhookSecret != nil && *payload.StripeWebhookSecret != "" {
+		// Encrypt the webhook secret before storing
+		encryptedWebhookSecret, err := encryptionService.Encrypt(*payload.StripeWebhookSecret)
+		if err != nil {
+			render.Render(w, r, errors.ErrServerError(fmt.Errorf("failed to encrypt webhook secret: %w", err)))
+			return
+		}
+		dbGuide.StripeWebhookSecret = &encryptedWebhookSecret
+	}
+
+	if payload.PaymentEnabled != nil {
+		dbGuide.PaymentEnabled = *payload.PaymentEnabled
+	}
+
+	dbGuide, err = config.GuideRepository.Update(dbGuide)
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return
+	}
+
+	render.JSON(w, r, map[string]string{"message": "Payment configuration updated successfully"})
 }

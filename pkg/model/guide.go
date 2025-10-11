@@ -24,6 +24,11 @@ type Guide struct {
 	IsActive              bool    `json:"is_active"`
 	EmergencyContactName  *string `json:"emergency_contact_name,omitempty"`
 	EmergencyContactPhone *string `json:"emergency_contact_phone,omitempty"`
+
+	// Payment configuration (sensitive fields excluded for security)
+	StripeAccountID *string `json:"stripe_account_id,omitempty"`
+	StripePublicKey *string `json:"stripe_public_key,omitempty"`
+	PaymentEnabled  bool    `json:"payment_enabled"`
 } // @name Guide
 
 type GuideCreatePayload struct {
@@ -40,6 +45,14 @@ type GuideCreatePayload struct {
 	EmergencyContactName  *string `json:"emergency_contact_name,omitempty"`
 	EmergencyContactPhone *string `json:"emergency_contact_phone,omitempty"`
 } // @name GuideCreatePayload
+
+type GuidePaymentConfigPayload struct {
+	StripeAccountID     *string `json:"stripe_account_id,omitempty"`
+	StripePublicKey     *string `json:"stripe_public_key,omitempty"`
+	StripeSecretKey     *string `json:"stripe_secret_key,omitempty"`
+	StripeWebhookSecret *string `json:"stripe_webhook_secret,omitempty"`
+	PaymentEnabled      *bool   `json:"payment_enabled,omitempty"`
+} // @name GuidePaymentConfigPayload
 
 func (g *GuideCreatePayload) Bind(r *http.Request) error {
 	if g.FirstName == nil {

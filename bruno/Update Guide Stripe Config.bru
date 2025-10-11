@@ -1,0 +1,89 @@
+meta {
+  name: Update Guide Stripe Configuration
+  type: http
+  seq: 1
+}
+
+put {
+  url: {{base_url}}/guides/{{guide_id}}/payment-config
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+body:json {
+  {
+    "stripe_account_id": "acct_1234567890",
+    "stripe_public_key": "pk_test_51234567890",
+    "stripe_secret_key": "sk_test_51234567890",
+    "stripe_webhook_secret": "whsec_1234567890",
+    "payment_enabled": true
+  }
+}
+
+vars {
+  guide_id: 1
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+  
+  test("Response contains success message", function() {
+    expect(res.getBody()).to.have.property('message');
+  });
+}
+
+docs {
+  # Update Guide Stripe Configuration
+  
+  This endpoint allows updating the Stripe payment configuration for a guide.
+  
+  ## Authentication
+  - Requires Bearer token authentication
+  - User must be logged in
+  - User must have permission to update guide payment configuration
+  
+  ## Parameters
+  - `guide_id`: The ID of the guide to update (path parameter)
+  
+  ## Request Body
+  All fields are optional - only provide the fields you want to update:
+  
+  - `stripe_account_id`: Stripe Connect account ID for the guide
+  - `stripe_public_key`: Stripe publishable key for the guide's account
+  - `stripe_secret_key`: Stripe secret key for the guide's account  
+  - `stripe_webhook_secret`: Stripe webhook secret for payment event handling
+  - `payment_enabled`: Boolean to enable/disable payments for this guide
+  
+  ## Response
+  Returns a success message when configuration is updated successfully.
+  
+  ## Example Usage
+  ```bash
+  # Enable payments for guide with Stripe credentials
+  PUT /guides/1/payment-config
+  {
+    "stripe_account_id": "acct_1234567890",
+    "stripe_public_key": "pk_test_51234567890", 
+    "stripe_secret_key": "sk_test_51234567890",
+    "stripe_webhook_secret": "whsec_1234567890",
+    "payment_enabled": true
+  }
+  
+  # Disable payments for guide
+  PUT /guides/1/payment-config
+  {
+    "payment_enabled": false
+  }
+  ```
+  
+  ## Security Notes
+  - Stripe credentials are encrypted before storage
+  - Only the guide owner or admin can update payment configuration
+  - Webhook secrets are required for proper payment event handling
+}

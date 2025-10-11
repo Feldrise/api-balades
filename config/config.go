@@ -6,6 +6,9 @@ import (
 	"feldrise.com/balade/database"
 	"feldrise.com/balade/database/dbmodel"
 	"feldrise.com/balade/pkg/notifications/email"
+	"feldrise.com/balade/pkg/payments"
+	"feldrise.com/balade/pkg/payments/stripe"
+	"feldrise.com/balade/pkg/security"
 	"github.com/spf13/viper"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -51,9 +54,11 @@ type Config struct {
 	GuideRepository                   dbmodel.GuideRepository
 	UserPermissionOverrideRepository  dbmodel.UserPermissionOverrideRepository
 	UserRepository                    dbmodel.UserRepository
+	PaymentRepository                 dbmodel.PaymentRepository
 
 	// Services
-	EmailService email.EmailService
+	EmailService   email.EmailService
+	PaymentService payments.PaymentService
 }
 
 func initViper(configName string) (Constants, error) {
@@ -134,6 +139,7 @@ func New() (*Config, error) {
 	config.GuideRepository = dbmodel.NewGuideRepository(databaseSession)
 	config.UserPermissionOverrideRepository = dbmodel.NewUserPermissionOverrideRepository(databaseSession)
 	config.UserRepository = dbmodel.NewUserRepository(databaseSession)
+	config.PaymentRepository = dbmodel.NewPaymentRepository(databaseSession)
 
 	// Email
 	config.EmailService = email.NewEmailService(
@@ -144,6 +150,19 @@ func New() (*Config, error) {
 			Email:    constants.EmailCredentials.Email,
 			Password: constants.EmailCredentials.Password,
 		},
+	)
+
+	// Payment Service
+	stripeService := stripe.NewStripeService()
+	encryptionService := security.NewEncryptionService(constants.JWTSecret)
+	config.PaymentService = payments.NewPaymentService(
+		config.PaymentRepository,
+		config.RambleRegistrationRepository,
+		config.RambleRegistrationGroupRepository,
+		config.RambleRepository,
+		config.GuideRepository,
+		stripeService,
+		encryptionService,
 	)
 
 	return &config, nil

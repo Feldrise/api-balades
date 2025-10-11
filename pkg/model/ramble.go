@@ -35,6 +35,12 @@ type Ramble struct {
 	CancellationReason     *string       `json:"cancellation_reason,omitempty"`
 	Guides                 []Guide       `json:"guides,omitempty"`
 	PlacesLeft             *int          `json:"places_left,omitempty"`
+
+	// Payment fields
+	PaymentGuideID  *uint  `json:"payment_guide_id,omitempty"`
+	PaymentEnabled  bool   `json:"payment_enabled"`
+	PaymentRequired bool   `json:"payment_required"`
+	PaymentGuide    *Guide `json:"payment_guide,omitempty"`
 } // @name Ramble
 
 type RambleCreatePayload struct {
@@ -53,6 +59,11 @@ type RambleCreatePayload struct {
 	AdditionalDocumentBase64 *string       `json:"additional_document_base64,omitempty"` // Base64 encoded document
 	GuideIDs                 []uint        `json:"guide_ids,omitempty"`                  // Array of guide IDs
 	Prices                   []RamblePrice `json:"prices" binding:"required"`
+
+	// Payment fields
+	PaymentGuideID  *uint `json:"payment_guide_id,omitempty"`
+	PaymentEnabled  *bool `json:"payment_enabled,omitempty"`
+	PaymentRequired *bool `json:"payment_required,omitempty"`
 } // @name RambleCreatePayload
 
 func (rb *RambleCreatePayload) Bind(r *http.Request) error {

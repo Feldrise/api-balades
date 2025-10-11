@@ -25,6 +25,13 @@ type Guide struct {
 	IsActive              bool `gorm:"not null;default:true"`
 	EmergencyContactName  *string
 	EmergencyContactPhone *string
+
+	// Payment configuration
+	StripeAccountID     *string `gorm:"column:stripe_account_id"`
+	StripePublicKey     *string `gorm:"column:stripe_public_key"`
+	StripeSecretKey     *string `gorm:"column:stripe_secret_key"`     // Should be encrypted
+	StripeWebhookSecret *string `gorm:"column:stripe_webhook_secret"` // Should be encrypted
+	PaymentEnabled      bool    `gorm:"not null;default:false"`
 }
 
 func (g Guide) ToModel() model.Guide {
@@ -45,6 +52,9 @@ func (g Guide) ToModel() model.Guide {
 		IsActive:              g.IsActive,
 		EmergencyContactName:  g.EmergencyContactName,
 		EmergencyContactPhone: g.EmergencyContactPhone,
+		StripeAccountID:       g.StripeAccountID,
+		StripePublicKey:       g.StripePublicKey,
+		PaymentEnabled:        g.PaymentEnabled,
 	}
 }
 

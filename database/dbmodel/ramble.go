@@ -43,12 +43,18 @@ type Ramble struct {
 	CancellationDate   *time.Time
 	CancellationReason *string
 
+	// Payment fields
+	PaymentGuideID  *uint `gorm:"column:payment_guide_id;index"`
+	PaymentEnabled  bool  `gorm:"not null;default:false"`
+	PaymentRequired bool  `gorm:"not null;default:false"`
+
 	// Many-to-many relationship with guides
 	Guides []Guide `gorm:"many2many:ramble_guides;"`
 
 	// Foreign Objects
 	Prices        []RamblePrice        `gorm:"foreignKey:RambleID;"`
 	Registrations []RambleRegistration `gorm:"foreignKey:RambleID;"`
+	PaymentGuide  *Guide               `gorm:"foreignKey:PaymentGuideID"`
 
 	// Computed fields (not stored in database)
 	PlacesLeft *int `gorm:"-"`
@@ -91,7 +97,7 @@ func (rm Ramble) ToModel() model.Ramble {
 	// Calculate places left
 	rm.CalculatePlacesLeft()
 
-	return model.Ramble{
+	rambleModel := model.Ramble{
 		ID:                     rm.ID,
 		CreatedAt:              rm.CreatedAt,
 		UpdatedAt:              rm.UpdatedAt,
@@ -114,7 +120,17 @@ func (rm Ramble) ToModel() model.Ramble {
 		CancellationReason:     rm.CancellationReason,
 		Guides:                 guides,
 		PlacesLeft:             rm.PlacesLeft,
+		PaymentGuideID:         rm.PaymentGuideID,
+		PaymentEnabled:         rm.PaymentEnabled,
+		PaymentRequired:        rm.PaymentRequired,
 	}
+
+	if rm.PaymentGuide != nil {
+		paymentGuide := rm.PaymentGuide.ToModel()
+		rambleModel.PaymentGuide = &paymentGuide
+	}
+
+	return rambleModel
 }
 
 type RambleFilter struct {
@@ -151,7 +167,7 @@ func (r *rambleRepository) FindByID(id uint) (*Ramble, error) {
 	var ramble Ramble
 	tx := r.db.WithContext(ctx).Model(&ramble)
 
-	tx = tx.Preload("Prices").Preload("Guides").Preload("Registrations")
+	tx = tx.Preload("Prices").Preload("Guides").Preload("Registrations").Preload("PaymentGuide")
 
 	err := tx.First(&ramble, id).Error
 
@@ -208,7 +224,7 @@ func (r *rambleRepository) FindAll(filter *RambleFilter) ([]Ramble, error) {
 		}
 	}
 
-	tx = tx.Preload("Prices").Preload("Guides").Preload("Registrations")
+	tx = tx.Preload("Prices").Preload("Guides").Preload("Registrations").Preload("PaymentGuide")
 
 	err := tx.Find(&rambles).Error
 

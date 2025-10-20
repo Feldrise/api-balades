@@ -223,7 +223,7 @@ func formatDate(date *time.Time) string {
 	if date == nil {
 		return "Date à confirmer"
 	}
-	return date.Format("2 January 2006 à 15:04")
+	return date.Local().Format("2 January 2006 à 15:04")
 }
 
 func formatLocation(location *string) string {

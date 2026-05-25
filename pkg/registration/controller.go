@@ -104,6 +104,21 @@ func (config *Config) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	user := authentication.ForContext(r.Context())
+	if user != nil {
+		canView, err := config.canViewRambleRegistrations(user, registration.RambleID)
+		if err != nil {
+			render.Render(w, r, errors.ErrServerError(err))
+			return
+		}
+
+		isOwnRegistration := registration.UserID != nil && *registration.UserID == user.ID
+		if !canView && !isOwnRegistration {
+			render.Render(w, r, errors.ErrForbidden("insufficient permissions"))
+			return
+		}
+	}
+
 	render.JSON(w, r, registration.ToModel())
 }
 
@@ -277,15 +292,8 @@ func (config *Config) Cancel(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {object} errors.ErrResponse
 // @Router /registrations/ramble/{rambleId} [get]
 func (config *Config) GetRambleRegistrations(w http.ResponseWriter, r *http.Request) {
-	user := authentication.ForContext(r.Context())
+	user := config.requireAuthenticatedUser(w, r)
 	if user == nil {
-		render.Render(w, r, errors.ErrUnauthorized("authentication required"))
-		return
-	}
-
-	// Check if user has permission to view all registrations
-	if !user.HasPermission("view:all-registrations") {
-		render.Render(w, r, errors.ErrForbidden("insufficient permissions"))
 		return
 	}
 
@@ -293,6 +301,10 @@ func (config *Config) GetRambleRegistrations(w http.ResponseWriter, r *http.Requ
 	rambleId, err := strconv.Atoi(rambleIdParam)
 	if err != nil {
 		render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("invalid ramble ID")))
+		return
+	}
+
+	if !config.requireRambleRegistrationAccess(w, r, user, uint(rambleId), "view:all-registrations", "view:registrations:self") {
 		return
 	}
 

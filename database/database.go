@@ -41,6 +41,8 @@ func ApplySeeds(database *gorm.DB) {
 		{"SeedV3", seed.SeedV3},
 		{"SeedV4", seed.SeedV4},
 		{"SeedV5", seed.SeedV5},
+		{"SeedV6", seed.SeedV6},
+		{"SeedV7", seed.SeedV7},
 	}
 
 	for _, seedToApply := range seedsToApply {

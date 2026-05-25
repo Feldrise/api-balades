@@ -14,6 +14,11 @@ import (
 
 // GetGroup retrieves a specific group by ID
 func (config *Config) GetGroup(w http.ResponseWriter, r *http.Request) {
+	user := config.requireAuthenticatedUser(w, r)
+	if user == nil {
+		return
+	}
+
 	groupIDStr := chi.URLParam(r, "id")
 	groupID, err := strconv.ParseUint(groupIDStr, 10, 32)
 	if err != nil {
@@ -32,15 +37,28 @@ func (config *Config) GetGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !config.requireRambleRegistrationAccess(w, r, user, group.RambleID, "view:all-registrations", "view:registrations:self") {
+		return
+	}
+
 	render.JSON(w, r, group.ToModel())
 }
 
 // GetGroupsByRamble retrieves all groups for a specific ramble
 func (config *Config) GetGroupsByRamble(w http.ResponseWriter, r *http.Request) {
+	user := config.requireAuthenticatedUser(w, r)
+	if user == nil {
+		return
+	}
+
 	rambleIDStr := chi.URLParam(r, "rambleId")
 	rambleID, err := strconv.ParseUint(rambleIDStr, 10, 32)
 	if err != nil {
 		render.Render(w, r, errors.ErrInvalidRequest(err))
+		return
+	}
+
+	if !config.requireRambleRegistrationAccess(w, r, user, uint(rambleID), "view:all-registrations", "view:registrations:self") {
 		return
 	}
 
@@ -64,6 +82,11 @@ func (config *Config) GetGroupsByRamble(w http.ResponseWriter, r *http.Request) 
 
 // ConfirmGroup confirms all registrations in a group
 func (config *Config) ConfirmGroup(w http.ResponseWriter, r *http.Request) {
+	user := config.requireAuthenticatedUser(w, r)
+	if user == nil {
+		return
+	}
+
 	groupIDStr := chi.URLParam(r, "id")
 	groupID, err := strconv.ParseUint(groupIDStr, 10, 32)
 	if err != nil {
@@ -85,6 +108,10 @@ func (config *Config) ConfirmGroup(w http.ResponseWriter, r *http.Request) {
 
 	if group == nil {
 		render.Render(w, r, errors.ErrNotFound())
+		return
+	}
+
+	if !config.requireRambleRegistrationAccess(w, r, user, group.RambleID, "update:registration-status", "update:registration-status:self") {
 		return
 	}
 
@@ -144,6 +171,11 @@ func (config *Config) ConfirmGroup(w http.ResponseWriter, r *http.Request) {
 
 // CancelGroup cancels all registrations in a group
 func (config *Config) CancelGroup(w http.ResponseWriter, r *http.Request) {
+	user := config.requireAuthenticatedUser(w, r)
+	if user == nil {
+		return
+	}
+
 	groupIDStr := chi.URLParam(r, "id")
 	groupID, err := strconv.ParseUint(groupIDStr, 10, 32)
 	if err != nil {
@@ -165,6 +197,10 @@ func (config *Config) CancelGroup(w http.ResponseWriter, r *http.Request) {
 
 	if group == nil {
 		render.Render(w, r, errors.ErrNotFound())
+		return
+	}
+
+	if !config.requireRambleRegistrationAccess(w, r, user, group.RambleID, "update:registration-status", "update:registration-status:self") {
 		return
 	}
 
@@ -215,6 +251,11 @@ func (config *Config) CancelGroup(w http.ResponseWriter, r *http.Request) {
 
 // AdminGetAllGroups retrieves all groups with optional filtering
 func (config *Config) AdminGetAllGroups(w http.ResponseWriter, r *http.Request) {
+	user := config.requireAuthenticatedUser(w, r)
+	if user == nil {
+		return
+	}
+
 	var filter dbmodel.RambleRegistrationGroupFilter
 
 	// Parse query parameters
@@ -222,6 +263,17 @@ func (config *Config) AdminGetAllGroups(w http.ResponseWriter, r *http.Request) 
 		if rambleID, err := strconv.ParseUint(rambleIDStr, 10, 32); err == nil {
 			id := uint(rambleID)
 			filter.RambleID = &id
+		}
+	}
+
+	if !user.HasPermission("view:all-registrations") {
+		if filter.RambleID == nil {
+			render.Render(w, r, errors.ErrForbidden("ramble_id is required"))
+			return
+		}
+
+		if !config.requireRambleRegistrationAccess(w, r, user, *filter.RambleID, "view:all-registrations", "view:registrations:self") {
+			return
 		}
 	}
 
@@ -249,6 +301,11 @@ func (config *Config) AdminGetAllGroups(w http.ResponseWriter, r *http.Request) 
 
 // AdminUpdateGroupStatus updates the status of a group (admin only)
 func (config *Config) AdminUpdateGroupStatus(w http.ResponseWriter, r *http.Request) {
+	user := config.requireAuthenticatedUser(w, r)
+	if user == nil {
+		return
+	}
+
 	groupIDStr := chi.URLParam(r, "id")
 	groupID, err := strconv.ParseUint(groupIDStr, 10, 32)
 	if err != nil {
@@ -274,6 +331,10 @@ func (config *Config) AdminUpdateGroupStatus(w http.ResponseWriter, r *http.Requ
 
 	if group == nil {
 		render.Render(w, r, errors.ErrNotFound())
+		return
+	}
+
+	if !config.requireRambleRegistrationAccess(w, r, user, group.RambleID, "update:registration-status", "update:registration-status:self") {
 		return
 	}
 
@@ -335,6 +396,11 @@ func (config *Config) AdminUpdateGroupStatus(w http.ResponseWriter, r *http.Requ
 
 // AdminDeleteGroup deletes a group and all its registrations (admin only)
 func (config *Config) AdminDeleteGroup(w http.ResponseWriter, r *http.Request) {
+	user := config.requireAuthenticatedUser(w, r)
+	if user == nil {
+		return
+	}
+
 	groupIDStr := chi.URLParam(r, "id")
 	groupID, err := strconv.ParseUint(groupIDStr, 10, 32)
 	if err != nil {
@@ -350,6 +416,10 @@ func (config *Config) AdminDeleteGroup(w http.ResponseWriter, r *http.Request) {
 
 	if group == nil {
 		render.Render(w, r, errors.ErrNotFound())
+		return
+	}
+
+	if !config.requireRambleRegistrationAccess(w, r, user, group.RambleID, "manage:registration", "manage:registration:self") {
 		return
 	}
 

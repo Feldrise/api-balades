@@ -213,12 +213,27 @@ func (config *Config) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle guide associations if provided
-	if len(payload.GuideIDs) > 0 {
-		guides := make([]dbmodel.Guide, len(payload.GuideIDs))
-		for i, guideID := range payload.GuideIDs {
-			guides[i] = dbmodel.Guide{Model: gorm.Model{ID: guideID}}
+	if loggedUser.HasPermission("update:ramble") {
+		if len(payload.GuideIDs) > 0 {
+			guides := make([]dbmodel.Guide, len(payload.GuideIDs))
+			for i, guideID := range payload.GuideIDs {
+				guides[i] = dbmodel.Guide{Model: gorm.Model{ID: guideID}}
+			}
+			dbRamble.Guides = guides
 		}
-		dbRamble.Guides = guides
+	} else {
+		callerGuide, err := config.GuideRepository.FindByUserID(loggedUser.ID)
+		if err != nil {
+			render.Render(w, r, errors.ErrServerError(err))
+			return
+		}
+
+		if callerGuide == nil {
+			render.Render(w, r, errors.ErrForbidden("guide profile not linked to your account"))
+			return
+		}
+
+		dbRamble.Guides = []dbmodel.Guide{{Model: gorm.Model{ID: callerGuide.ID}}}
 	}
 
 	// Create the ramble first to get the ID
@@ -318,21 +333,24 @@ func (config *Config) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	helper.ApplyChanges(data, dbRamble)
-
 	// Handle guide IDs if provided in the update
 	if guideIDsInterface, exists := data["guide_ids"]; exists {
-		if guideIDsSlice, ok := guideIDsInterface.([]interface{}); ok {
-			guides := make([]dbmodel.Guide, len(guideIDsSlice))
-			for i, guideIDInterface := range guideIDsSlice {
-				if guideIDFloat, ok := guideIDInterface.(float64); ok {
-					guideID := uint(guideIDFloat)
-					guides[i] = dbmodel.Guide{Model: gorm.Model{ID: guideID}}
+		if loggedUser.HasPermission("update:ramble") {
+			if guideIDsSlice, ok := guideIDsInterface.([]interface{}); ok {
+				guides := make([]dbmodel.Guide, len(guideIDsSlice))
+				for i, guideIDInterface := range guideIDsSlice {
+					if guideIDFloat, ok := guideIDInterface.(float64); ok {
+						guideID := uint(guideIDFloat)
+						guides[i] = dbmodel.Guide{Model: gorm.Model{ID: guideID}}
+					}
 				}
+				dbRamble.Guides = guides
 			}
-			dbRamble.Guides = guides
 		}
+		delete(data, "guide_ids")
 	}
+
+	helper.ApplyChanges(data, dbRamble)
 
 	// Handle cover image upload if provided
 	if coverImageInterface, exists := data["cover_image_base64"]; exists {

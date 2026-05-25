@@ -54,6 +54,10 @@ type GuidePaymentConfigPayload struct {
 	PaymentEnabled      *bool   `json:"payment_enabled,omitempty"`
 } // @name GuidePaymentConfigPayload
 
+type GuideLinkUserPayload struct {
+	UserID *uint `json:"user_id" binding:"required"`
+} // @name GuideLinkUserPayload
+
 func (g *GuideCreatePayload) Bind(r *http.Request) error {
 	if g.FirstName == nil {
 		return errors.New("first_name is required")
@@ -65,6 +69,14 @@ func (g *GuideCreatePayload) Bind(r *http.Request) error {
 
 	if g.Email == nil {
 		return errors.New("email is required")
+	}
+
+	return nil
+}
+
+func (g *GuideLinkUserPayload) Bind(r *http.Request) error {
+	if g.UserID == nil {
+		return errors.New("user_id is required")
 	}
 
 	return nil

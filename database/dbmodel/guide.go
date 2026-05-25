@@ -12,6 +12,9 @@ import (
 type Guide struct {
 	gorm.Model
 
+	UserID *uint `gorm:"uniqueIndex"`
+	User   *User `gorm:"foreignKey:UserID"`
+
 	FirstName             string `gorm:"not null"`
 	LastName              string `gorm:"not null"`
 	Email                 string `gorm:"not null;unique"`
@@ -65,6 +68,8 @@ type GuideFilter struct {
 
 type GuideRepository interface {
 	FindByID(id uint) (*Guide, error)
+	FindByUserID(userID uint) (*Guide, error)
+	UserOwnsRamble(userID uint, rambleID uint) (bool, error)
 	FindAll(filter *GuideFilter) ([]Guide, error)
 	Create(guide *Guide) (*Guide, error)
 	Update(guide *Guide) (*Guide, error)
@@ -77,6 +82,41 @@ type guideRepository struct {
 
 func NewGuideRepository(db *gorm.DB) GuideRepository {
 	return &guideRepository{db: db}
+}
+
+func (r *guideRepository) FindByUserID(userID uint) (*Guide, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var guide Guide
+	err := r.db.WithContext(ctx).Where("user_id = ?", userID).First(&guide).Error
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &guide, nil
+}
+
+func (r *guideRepository) UserOwnsRamble(userID uint, rambleID uint) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("ramble_guides").
+		Joins("JOIN guides ON guides.id = ramble_guides.guide_id").
+		Where("guides.user_id = ? AND ramble_guides.ramble_id = ? AND guides.deleted_at IS NULL", userID, rambleID).
+		Count(&count).Error
+
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
 }
 
 func (r *guideRepository) FindByID(id uint) (*Guide, error) {

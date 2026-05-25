@@ -20,6 +20,7 @@ type User struct {
 	Roles               []Role                   `gorm:"many2many:user_roles;"`
 	PermissionOverrides []UserPermissionOverride `gorm:"foreignKey:UserID"`
 	UserProfile         UserProfile              `gorm:"foreignKey:UserID"`
+	Guide               *Guide                   `gorm:"foreignKey:UserID"`
 }
 
 func (u *User) ToModel() *model.User {

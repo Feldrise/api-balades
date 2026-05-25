@@ -54,6 +54,7 @@ type Config struct {
 	GuideRepository                   dbmodel.GuideRepository
 	UserPermissionOverrideRepository  dbmodel.UserPermissionOverrideRepository
 	UserRepository                    dbmodel.UserRepository
+	RoleRepository                    dbmodel.RoleRepository
 	PaymentRepository                 dbmodel.PaymentRepository
 
 	// Services
@@ -139,6 +140,7 @@ func New() (*Config, error) {
 	config.GuideRepository = dbmodel.NewGuideRepository(databaseSession)
 	config.UserPermissionOverrideRepository = dbmodel.NewUserPermissionOverrideRepository(databaseSession)
 	config.UserRepository = dbmodel.NewUserRepository(databaseSession)
+	config.RoleRepository = dbmodel.NewRoleRepository(databaseSession)
 	config.PaymentRepository = dbmodel.NewPaymentRepository(databaseSession)
 
 	// Email

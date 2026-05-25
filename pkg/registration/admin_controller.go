@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"feldrise.com/balade/database/dbmodel"
-	"feldrise.com/balade/pkg/authentication"
 	"feldrise.com/balade/pkg/errors"
 	"feldrise.com/balade/pkg/model"
 	"github.com/go-chi/chi"
@@ -29,14 +28,8 @@ import (
 // @Failure 500 {object} errors.ErrResponse
 // @Router /registrations/admin [get]
 func (config *Config) AdminGetAllRegistrations(w http.ResponseWriter, r *http.Request) {
-	user := authentication.ForContext(r.Context())
+	user := config.requireAuthenticatedUser(w, r)
 	if user == nil {
-		render.Render(w, r, errors.ErrUnauthorized("authentication required"))
-		return
-	}
-
-	if !user.HasPermission("view:all-registrations") {
-		render.Render(w, r, errors.ErrForbidden("insufficient permissions"))
 		return
 	}
 
@@ -45,6 +38,17 @@ func (config *Config) AdminGetAllRegistrations(w http.ResponseWriter, r *http.Re
 	if err := parseAdminFilterFromQuery(r, filter); err != nil {
 		render.Render(w, r, errors.ErrInvalidRequest(err))
 		return
+	}
+
+	if !user.HasPermission("view:all-registrations") {
+		if filter.RambleID == nil {
+			render.Render(w, r, errors.ErrForbidden("ramble_id is required"))
+			return
+		}
+
+		if !config.requireRambleRegistrationAccess(w, r, user, *filter.RambleID, "view:all-registrations", "view:registrations:self") {
+			return
+		}
 	}
 
 	// Convert to database filter
@@ -112,14 +116,8 @@ func (config *Config) AdminGetAllRegistrations(w http.ResponseWriter, r *http.Re
 // @Failure 500 {object} errors.ErrResponse
 // @Router /registrations/admin/{id} [put]
 func (config *Config) AdminUpdateRegistration(w http.ResponseWriter, r *http.Request) {
-	user := authentication.ForContext(r.Context())
+	user := config.requireAuthenticatedUser(w, r)
 	if user == nil {
-		render.Render(w, r, errors.ErrUnauthorized("authentication required"))
-		return
-	}
-
-	if !user.HasPermission("update:registration-details") {
-		render.Render(w, r, errors.ErrForbidden("insufficient permissions"))
 		return
 	}
 
@@ -144,6 +142,10 @@ func (config *Config) AdminUpdateRegistration(w http.ResponseWriter, r *http.Req
 
 	if registration == nil {
 		render.Render(w, r, errors.ErrNotFound())
+		return
+	}
+
+	if !config.requireRambleRegistrationAccess(w, r, user, registration.RambleID, "update:registration-details", "update:registration-details:self") {
 		return
 	}
 
@@ -194,14 +196,8 @@ func (config *Config) AdminUpdateRegistration(w http.ResponseWriter, r *http.Req
 // @Failure 500 {object} errors.ErrResponse
 // @Router /registrations/admin/{id}/status [put]
 func (config *Config) AdminUpdateRegistrationStatus(w http.ResponseWriter, r *http.Request) {
-	user := authentication.ForContext(r.Context())
+	user := config.requireAuthenticatedUser(w, r)
 	if user == nil {
-		render.Render(w, r, errors.ErrUnauthorized("authentication required"))
-		return
-	}
-
-	if !user.HasPermission("update:registration-status") {
-		render.Render(w, r, errors.ErrForbidden("insufficient permissions"))
 		return
 	}
 
@@ -226,6 +222,10 @@ func (config *Config) AdminUpdateRegistrationStatus(w http.ResponseWriter, r *ht
 
 	if registration == nil {
 		render.Render(w, r, errors.ErrNotFound())
+		return
+	}
+
+	if !config.requireRambleRegistrationAccess(w, r, user, registration.RambleID, "update:registration-status", "update:registration-status:self") {
 		return
 	}
 
@@ -263,14 +263,8 @@ func (config *Config) AdminUpdateRegistrationStatus(w http.ResponseWriter, r *ht
 // @Failure 500 {object} errors.ErrResponse
 // @Router /registrations/admin/{id} [delete]
 func (config *Config) AdminDeleteRegistration(w http.ResponseWriter, r *http.Request) {
-	user := authentication.ForContext(r.Context())
+	user := config.requireAuthenticatedUser(w, r)
 	if user == nil {
-		render.Render(w, r, errors.ErrUnauthorized("authentication required"))
-		return
-	}
-
-	if !user.HasPermission("manage:registration") {
-		render.Render(w, r, errors.ErrForbidden("insufficient permissions"))
 		return
 	}
 
@@ -289,6 +283,10 @@ func (config *Config) AdminDeleteRegistration(w http.ResponseWriter, r *http.Req
 
 	if registration == nil {
 		render.Render(w, r, errors.ErrNotFound())
+		return
+	}
+
+	if !config.requireRambleRegistrationAccess(w, r, user, registration.RambleID, "manage:registration", "manage:registration:self") {
 		return
 	}
 
@@ -320,13 +318,12 @@ func (config *Config) AdminDeleteRegistration(w http.ResponseWriter, r *http.Req
 // @Failure 500 {object} errors.ErrResponse
 // @Router /registrations/admin/bulk-action [post]
 func (config *Config) AdminBulkRegistrationAction(w http.ResponseWriter, r *http.Request) {
-	user := authentication.ForContext(r.Context())
+	user := config.requireAuthenticatedUser(w, r)
 	if user == nil {
-		render.Render(w, r, errors.ErrUnauthorized("authentication required"))
 		return
 	}
 
-	if !user.HasPermission("bulk:registration-actions") {
+	if !config.hasAnyBulkPermission(user) {
 		render.Render(w, r, errors.ErrForbidden("insufficient permissions"))
 		return
 	}
@@ -366,6 +363,25 @@ func (config *Config) AdminBulkRegistrationAction(w http.ResponseWriter, r *http
 			continue
 		}
 
+		canAct, err := config.canBulkRegistrationActions(user, registration.RambleID)
+		if err != nil {
+			result.FailureCount++
+			result.Errors = append(result.Errors, model.BulkActionError{
+				RegistrationID: registrationID,
+				Error:          fmt.Sprintf("Permission check failed: %v", err),
+			})
+			continue
+		}
+
+		if !canAct {
+			result.FailureCount++
+			result.Errors = append(result.Errors, model.BulkActionError{
+				RegistrationID: registrationID,
+				Error:          "insufficient permissions for this registration",
+			})
+			continue
+		}
+
 		var actionErr error
 		switch data.Action {
 		case "confirm":
@@ -375,7 +391,10 @@ func (config *Config) AdminBulkRegistrationAction(w http.ResponseWriter, r *http
 		case "move_to_waiting":
 			actionErr = config.updateRegistrationStatus(registration, "waiting_list", data.Reason, sendEmail)
 		case "delete":
-			if !user.HasPermission("manage:registration") {
+			canDelete, err := config.canManageRegistration(user, registration.RambleID)
+			if err != nil {
+				actionErr = err
+			} else if !canDelete {
 				actionErr = fmt.Errorf("insufficient permissions for delete action")
 			} else {
 				rambleID := registration.RambleID

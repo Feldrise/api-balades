@@ -1,0 +1,107 @@
+name: balade-api-prod
+
+services:
+  balade-api:
+    # Rewritten during deployment with the GHCR image built by GitHub Actions.
+    image: ghcr.io/owner/balade-api:latest
+    container_name: balade-api-prod
+    restart: unless-stopped
+    depends_on:
+      balade-db:
+        condition: service_healthy
+    networks:
+      - balade-network
+    ports:
+      - "8081:8080"
+    volumes:
+      - balade-uploads:/app/uploads
+      - ./config.prod.yml:/app/config.yml:ro
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/swagger/index.html"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  balade-db:
+    image: postgres:15.8-alpine3.20
+    container_name: balade-db-prod
+    restart: unless-stopped
+    networks:
+      - balade-network
+    environment:
+      POSTGRES_USER: balade
+      POSTGRES_PASSWORD: "POSTGRES_PASSWORD_PLACEHOLDER"
+      POSTGRES_DB: balade
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    volumes:
+      - balade-postgres:/var/lib/postgresql/data
+      - ./backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U balade -d balade"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Optional: pgAdmin for database administration.
+  # Start with: docker compose -f docker-compose.prod.yml --profile admin up -d
+  balade-pgadmin:
+    image: dpage/pgadmin4:8.12
+    container_name: balade-pgadmin-prod
+    restart: unless-stopped
+    depends_on:
+      balade-db:
+        condition: service_healthy
+    networks:
+      - balade-network
+    environment:
+      PGADMIN_DEFAULT_EMAIL: "PGADMIN_EMAIL_PLACEHOLDER"
+      PGADMIN_DEFAULT_PASSWORD: "PGADMIN_PASSWORD_PLACEHOLDER"
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    volumes:
+      - balade-pgadmin:/var/lib/pgadmin
+    ports:
+      - "5050:80"
+    profiles:
+      - admin
+
+  # Optional: helper container for manual backups and restores.
+  # Start with: docker compose -f docker-compose.prod.yml --profile backup up -d
+  balade-backup:
+    image: postgres:15.8-alpine3.20
+    container_name: balade-backup-prod
+    restart: "no"
+    depends_on:
+      balade-db:
+        condition: service_healthy
+    networks:
+      - balade-network
+    environment:
+      PGUSER: balade
+      PGPASSWORD: "POSTGRES_PASSWORD_PLACEHOLDER"
+      PGHOST: balade-db
+      PGDATABASE: balade
+    volumes:
+      - ./backups:/backups
+      - ./scripts:/scripts:ro
+    command: >
+      sh -c "
+        echo 'Backup helper ready. Run docker compose exec balade-backup /scripts/backup.sh to create a manual backup.'
+        && tail -f /dev/null
+      "
+    profiles:
+      - backup
+
+volumes:
+  balade-postgres:
+    driver: local
+  balade-uploads:
+    driver: local
+  balade-pgadmin:
+    driver: local
+
+networks:
+  balade-network:
+    driver: bridge

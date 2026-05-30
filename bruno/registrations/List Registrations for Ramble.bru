@@ -1,0 +1,27 @@
+meta {
+  name: List Registrations for Ramble
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/registrations/ramble/{{ramble_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+docs {
+  Guide: requires `view:registrations:self` + ownership of the balade.
+
+  Alternative with filters: `GET /registrations/admin?ramble_id={{ramble_id}}`
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

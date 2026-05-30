@@ -1,0 +1,52 @@
+meta {
+  name: Create Ramble (guide)
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/rambles
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+body:json {
+  {
+    "title": "Balade test guide",
+    "type": "Découverte générale",
+    "difficulty": "Facile",
+    "description": "Created via Bruno",
+    "max_participants": 20,
+    "prices": [
+      {
+        "label": "Adulte",
+        "amount": 15
+      }
+    ]
+  }
+}
+
+script:post-response {
+  if (res.getStatus() === 201) {
+    const body = res.getBody();
+    if (body && body.id) {
+      bru.setEnvVar("ramble_id", String(body.id));
+    }
+  }
+}
+
+tests {
+  test("Status code is 201", function() {
+    expect(res.getStatus()).to.equal(201);
+  });
+}
+
+docs {
+  Guides: do not send `guide_ids` — the API assigns the logged-in guide automatically.
+
+  Requires `create:ramble` and a linked guide profile (`GET /guides/me` must succeed).
+}

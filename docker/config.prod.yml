@@ -1,0 +1,30 @@
+# Production configuration for the Balade Ecologique API.
+#
+# This file is copied to the server and mounted at /app/config.yml.
+# *_PLACEHOLDER values are replaced on the server by the GitHub Actions workflow.
+# Never commit real production secrets here.
+
+port: 8080
+jwtSecret: "JWT_SECRET_PLACEHOLDER"
+
+# Must match the writable volume mounted in docker-compose.prod.yml.
+# The app reads email templates from <dataPath>/emails and serves uploads from
+# <dataPath>/uploads.
+dataPath: "/app"
+
+baseURL: "BASE_URL_PLACEHOLDER"
+applicationURL: "APPLICATION_URL_PLACEHOLDER"
+
+# Database. The password placeholder must match POSTGRES_PASSWORD in compose.
+connectionString: "postgres://balade:POSTGRES_PASSWORD_PLACEHOLDER@balade-db:5432/balade?sslmode=disable"
+
+# Present for compatibility with the current Config struct. The API does not
+# currently require this value through env fallback, but viper can load it here.
+openai:
+  apiKey: "OPENAI_API_KEY_PLACEHOLDER"
+
+emailCredentials:
+  host: "EMAIL_HOST_PLACEHOLDER"
+  port: EMAIL_PORT_PLACEHOLDER
+  email: "EMAIL_EMAIL_PLACEHOLDER"
+  password: "EMAIL_PASSWORD_PLACEHOLDER"

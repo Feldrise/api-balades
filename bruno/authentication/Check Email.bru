@@ -1,0 +1,24 @@
+meta {
+  name: Check Email
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{base_url}}/authentication/check-email?email={{email}}
+  body: none
+  auth: none
+}
+
+docs {
+  # Check if email is already registered
+
+  - **200** + `"not exists"` — email is available
+  - **401** — email already exists
+}
+
+tests {
+  test("Status code is 200 or 401", function() {
+    expect([200, 401]).to.include(res.getStatus());
+  });
+}

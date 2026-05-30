@@ -1,0 +1,21 @@
+meta {
+  name: List Rambles
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/rambles?guide_id={{guide_id}}
+  body: none
+  auth: none
+}
+
+docs {
+  Public list. Filter by guide: `?guide_id={{guide_id}}`
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

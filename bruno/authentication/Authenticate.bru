@@ -1,0 +1,33 @@
+meta {
+  name: Authenticate (send OTP)
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/authentication/authenticate
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "email": "{{email}}",
+    "first_name": "Guide",
+    "last_name": "Test"
+  }
+}
+
+docs {
+  # Step 1 — Send OTP
+
+  Sends a 6-digit code to the email. If the user does not exist, a new account is created with the `user` role (first_name required for new users).
+
+  Copy the code from the email (or server logs in dev) into the `otp_code` environment variable, then run **Verify Authentication**.
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

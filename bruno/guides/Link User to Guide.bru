@@ -1,0 +1,35 @@
+meta {
+  name: Link User to Guide (admin)
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/guides/{{guide_id}}/link-user
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+body:json {
+  {
+    "user_id": {{user_id}}
+  }
+}
+
+docs {
+  # Admin — link user account to guide profile
+
+  Requires admin permission `create:user`.
+
+  Grants the `guide` role to the user. User should re-login (Verify Authentication) to refresh roles in the token session.
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

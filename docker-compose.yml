@@ -1,21 +1,62 @@
-version: '3.8'
 name: balade-api
 
 services:
+  # Uncomment this service when you want to run the API in Docker locally.
+  # api:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/Dockerfile.prod
+  #     target: runner
+  #   container_name: balade-api-dev
+  #   restart: unless-stopped
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #   environment:
+  #     PORT: "8080"
+  #     JWT_SECRET: "dev-secret-change-me"
+  #     DATA_PATH: "/app"
+  #     BASE_URL: "http://localhost:8080"
+  #     APPLICATION_URL: "http://localhost:3000"
+  #     CONNECTION_STRING: "postgres://balade:balade@db:5432/balade?sslmode=disable"
+  #     EMAIL_HOST: "localhost"
+  #     EMAIL_PORT: "1025"
+  #     EMAIL_EMAIL: "contact@balade.local"
+  #     EMAIL_PASSWORD: "dev-password"
+  #   volumes:
+  #     - api_uploads:/app/uploads
+  #   ports:
+  #     - "8080:8080"
+  #   networks:
+  #     - balade-dev-network
+
   db:
-    image: postgres:15
+    image: postgres:15.8-alpine3.20
+    container_name: balade-db-dev
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
       POSTGRES_USER: balade
       POSTGRES_PASSWORD: balade
       POSTGRES_DB: balade
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    networks:
+      - balade-dev-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U balade -d balade"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     ports:
       - "5432:5432"
-  dbAdmin: 
+
+  dbAdmin:
     image: dpage/pgadmin4:8
+    container_name: balade-pgadmin-dev
     volumes:
       - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - balade-dev-network
     environment:
       PGADMIN_DEFAULT_EMAIL: contact@balade.com
       PGADMIN_DEFAULT_PASSWORD: balade
@@ -25,3 +66,8 @@ services:
 volumes:
   postgres_data:
   pgadmin_data:
+  api_uploads:
+
+networks:
+  balade-dev-network:
+    driver: bridge

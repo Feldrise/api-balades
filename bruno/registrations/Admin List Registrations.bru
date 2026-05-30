@@ -1,0 +1,25 @@
+meta {
+  name: Admin List Registrations (filtered)
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/registrations/admin?ramble_id={{ramble_id}}&page=1&per_page=20
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+docs {
+  Guides **must** pass `ramble_id`. Admins can omit it to list all.
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

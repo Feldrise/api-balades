@@ -1,0 +1,41 @@
+meta {
+  name: Update Guide Stripe Config (admin)
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{base_url}}/guides/{{guide_id}}/payment-config
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+body:json {
+  {
+    "stripe_account_id": "acct_1234567890",
+    "stripe_public_key": "pk_test_51234567890",
+    "stripe_secret_key": "sk_test_51234567890",
+    "stripe_webhook_secret": "whsec_1234567890",
+    "payment_enabled": true
+  }
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("Response contains success message", function() {
+    expect(res.getBody()).to.have.property("message");
+  });
+}
+
+docs {
+  Admin: `PUT /guides/{id}/payment-config`
+
+  Guide self-service: `PUT /guides/me/payment-config` (same body, requires `configure:guide-payments:self`).
+}

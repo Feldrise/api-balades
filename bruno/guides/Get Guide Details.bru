@@ -1,0 +1,32 @@
+meta {
+  name: Get Guide Details
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/guides/{{guide_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("Response contains guide data", function() {
+    const body = res.getBody();
+    expect(body).to.have.property("id");
+    expect(body).to.have.property("first_name");
+    expect(body).to.have.property("last_name");
+  });
+}
+
+docs {
+  Public guide profile by ID (includes payment_enabled, not secret keys).
+}

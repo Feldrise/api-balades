@@ -1,0 +1,33 @@
+meta {
+  name: Update Registration Status
+  type: http
+  seq: 3
+}
+
+put {
+  url: {{base_url}}/registrations/admin/{{registration_id}}/status
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+body:json {
+  {
+    "status": "confirmed",
+    "reason": "Confirmed by guide",
+    "send_email": true
+  }
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}
+
+docs {
+  Status values: `pending`, `confirmed`, `waiting_list`, `cancelled`
+}

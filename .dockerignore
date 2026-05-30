@@ -1,0 +1,19 @@
+.git
+.github
+.vscode
+.idea
+
+__debug_bin*
+*.out
+*.test
+*.exe
+
+uploads
+exports
+vendor
+
+config.yml
+
+bruno
+exemple docker
+exemple .github

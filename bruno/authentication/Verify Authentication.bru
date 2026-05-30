@@ -1,0 +1,61 @@
+meta {
+  name: Verify Authentication (login)
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/authentication/verify-authentication
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "email": "{{email}}",
+    "code": "{{otp_code}}"
+  }
+}
+
+script:post-response {
+  const body = res.getBody();
+  if (body && body.token) {
+    bru.setEnvVar("auth_token", body.token);
+  }
+  if (body && body.user && body.user.id) {
+    bru.setEnvVar("user_id", String(body.user.id));
+  }
+}
+
+docs {
+  # Step 2 — Verify OTP & get JWT
+
+  On success, saves `auth_token` and `user_id` to the **Local** environment automatically.
+
+  Response shape:
+  ```json
+  {
+    "user": {
+      "id": 1,
+      "email": "guide@example.com",
+      "roles": ["guide"],
+      "permissions": ["create:ramble", "..."]
+    },
+    "token": "eyJ..."
+  }
+  ```
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("Response contains token and user", function() {
+    const body = res.getBody();
+    expect(body).to.have.property("token");
+    expect(body).to.have.property("user");
+    expect(body.user).to.have.property("roles");
+    expect(body.user).to.have.property("permissions");
+  });
+}

@@ -1,0 +1,37 @@
+meta {
+  name: Get Guide Me
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/guides/me
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+docs {
+  # Guide profile linked to current user
+
+  - **200** — guide profile (user has guide role + linked Guide record)
+  - **404** — not linked yet (admin must create guide and link-user)
+}
+
+tests {
+  test("Status code is 200 or 404", function() {
+    expect([200, 404]).to.include(res.getStatus());
+  });
+}
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    const body = res.getBody();
+    if (body && body.id) {
+      bru.setEnvVar("guide_id", String(body.id));
+    }
+  }
+}

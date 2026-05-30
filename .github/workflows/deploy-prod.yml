@@ -1,0 +1,146 @@
+name: Deploy Balade Ecologique API to Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: balade-api
+  DEPLOY_DIR: /opt/balade-api
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Lowercase repository owner and image name
+        id: lowercase
+        run: |
+          echo "repo_owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+          echo "image_name=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to the container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GH_TOKEN}}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.repo_owner }}/${{ steps.lowercase.outputs.image_name }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/Dockerfile.prod
+          target: runner
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Copy deployment files to production server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: "docker/docker-compose.prod.yml,docker/config.prod.yml,docker/scripts/backup.sh,docker/scripts/restore.sh"
+          target: ${{ env.DEPLOY_DIR }}
+          strip_components: 1
+          overwrite: true
+
+      - name: Deploy to production server
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -eu
+
+            DEPLOY_DIR="${{ env.DEPLOY_DIR }}"
+            IMAGE="${{ env.REGISTRY }}/${{ steps.lowercase.outputs.repo_owner }}/${{ steps.lowercase.outputs.image_name }}:latest"
+
+            cd "$DEPLOY_DIR"
+            mkdir -p backups
+            chmod +x scripts/*.sh
+
+            echo "${{ secrets.GH_TOKEN}}" | docker login "${{ env.REGISTRY }}" -u "${{ github.actor }}" --password-stdin
+
+            sed -i "s|image: ghcr.io/.*/balade-api:.*|image: ${IMAGE}|g" docker-compose.prod.yml
+
+            sed -i "s|POSTGRES_PASSWORD_PLACEHOLDER|${{ secrets.POSTGRES_PASSWORD }}|g" docker-compose.prod.yml
+            sed -i "s|PGADMIN_EMAIL_PLACEHOLDER|${{ secrets.PGADMIN_EMAIL }}|g" docker-compose.prod.yml
+            sed -i "s|PGADMIN_PASSWORD_PLACEHOLDER|${{ secrets.PGADMIN_PASSWORD }}|g" docker-compose.prod.yml
+
+            sed -i "s|JWT_SECRET_PLACEHOLDER|${{ secrets.JWT_SECRET }}|g" config.prod.yml
+            sed -i "s|BASE_URL_PLACEHOLDER|${{ secrets.BASE_URL }}|g" config.prod.yml
+            sed -i "s|APPLICATION_URL_PLACEHOLDER|${{ secrets.APPLICATION_URL }}|g" config.prod.yml
+            sed -i "s|POSTGRES_PASSWORD_PLACEHOLDER|${{ secrets.POSTGRES_PASSWORD }}|g" config.prod.yml
+            sed -i "s|OPENAI_API_KEY_PLACEHOLDER|${{ secrets.OPENAI_API_KEY }}|g" config.prod.yml
+            sed -i "s|EMAIL_HOST_PLACEHOLDER|${{ secrets.EMAIL_HOST }}|g" config.prod.yml
+            sed -i "s|EMAIL_PORT_PLACEHOLDER|${{ secrets.EMAIL_PORT }}|g" config.prod.yml
+            sed -i "s|EMAIL_EMAIL_PLACEHOLDER|${{ secrets.EMAIL_EMAIL }}|g" config.prod.yml
+            sed -i "s|EMAIL_PASSWORD_PLACEHOLDER|${{ secrets.EMAIL_PASSWORD }}|g" config.prod.yml
+
+            if docker compose -f docker-compose.prod.yml ps | grep -q "balade-db.*Up"; then
+              docker compose -f docker-compose.prod.yml exec -T balade-db \
+                pg_dump -U balade balade > "backups/auto_backup_$(date +%Y%m%d_%H%M%S).sql" || echo "Database backup failed"
+            fi
+
+            docker compose -f docker-compose.prod.yml pull balade-api
+            docker compose -f docker-compose.prod.yml up -d
+            docker image prune -f
+
+            echo "Checking application health..."
+            sleep 20
+
+            if docker compose -f docker-compose.prod.yml ps | grep -q "balade-api.*Up"; then
+              echo "Balade Ecologique API is running."
+              if command -v curl >/dev/null 2>&1; then
+                curl -f http://localhost:8080/swagger/index.html >/dev/null 2>&1 \
+                  && echo "API reachable." \
+                  || echo "API container is running but HTTP health is not ready yet."
+              fi
+            else
+              echo "Deployment problem detected."
+              docker compose -f docker-compose.prod.yml logs balade-api
+              exit 1
+            fi
+
+      - name: Deployment status
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "Balade Ecologique API deployment succeeded."
+          else
+            echo "Balade Ecologique API deployment failed."
+          fi

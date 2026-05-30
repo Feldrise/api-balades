@@ -1,0 +1,18 @@
+name: balade-api-test
+
+services:
+  balade-test-db:
+    image: postgres:15.8-alpine3.20
+    container_name: balade-test-db
+    environment:
+      POSTGRES_DB: balade_test
+      POSTGRES_USER: balade_test
+      POSTGRES_PASSWORD: balade_test_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U balade_test -d balade_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

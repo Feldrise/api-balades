@@ -9,6 +9,9 @@ import (
 	"feldrise.com/balade/pkg/notifications/email"
 )
 
+// confirmationDeadlineBeforeRamble is how long before the ramble unconfirmed pending registrations are cancelled.
+const confirmationDeadlineBeforeRamble = 12 * time.Hour
+
 type RegistrationScheduler struct {
 	rambleRepo       dbmodel.RambleRepository
 	registrationRepo dbmodel.RambleRegistrationRepository
@@ -68,11 +71,9 @@ func (s *RegistrationScheduler) processConfirmationRequests() {
 	}
 }
 
-// processUnconfirmedRegistrations releases spots for unconfirmed registrations 24h before the ramble
+// processUnconfirmedRegistrations releases spots for unconfirmed registrations past the confirmation deadline.
 func (s *RegistrationScheduler) processUnconfirmedRegistrations() {
-	twentyFourHoursFromNow := time.Now().Add(24 * time.Hour)
-
-	registrations, err := s.registrationRepo.GetUnconfirmedRegistrations(twentyFourHoursFromNow)
+	registrations, err := s.registrationRepo.GetUnconfirmedRegistrations(time.Now())
 	if err != nil {
 		log.Printf("Error getting unconfirmed registrations: %v", err)
 		return
@@ -93,8 +94,7 @@ func (s *RegistrationScheduler) sendConfirmationRequest(registration *dbmodel.Ra
 		return
 	}
 
-	// Set confirmation deadline to 24 hours before the ramble
-	confirmationDeadline := registration.Ramble.Date.Add(-24 * time.Hour)
+	confirmationDeadline := registration.Ramble.Date.Add(-confirmationDeadlineBeforeRamble)
 	registration.ConfirmationDeadline = &confirmationDeadline
 
 	// Update registration with deadline

@@ -20,6 +20,7 @@ func SeedV8(database *gorm.DB) error {
 		  AND rr.confirmation_deadline IS NOT NULL
 		  AND r.date IS NOT NULL
 		  AND r.date > NOW()
+		  AND rr.confirmation_deadline > NOW()
 		  AND rr.confirmation_deadline < r.date - INTERVAL '12 hours'
 	`)
 	if registrationsResult.Error != nil {
@@ -38,6 +39,7 @@ func SeedV8(database *gorm.DB) error {
 		  AND rg.confirmation_deadline IS NOT NULL
 		  AND r.date IS NOT NULL
 		  AND r.date > NOW()
+		  AND rg.confirmation_deadline > NOW()
 		  AND rg.confirmation_deadline < r.date - INTERVAL '12 hours'
 	`)
 	if groupsResult.Error != nil {

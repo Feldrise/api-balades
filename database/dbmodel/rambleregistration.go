@@ -99,7 +99,7 @@ type RambleRegistrationRepository interface {
 	FindByRambleAndStatus(rambleID uint, status string) ([]RambleRegistration, error)
 	GetNextInWaitingList(rambleID uint) (*RambleRegistration, error)
 	GetRegistrationsRequiringConfirmation(beforeDate time.Time) ([]RambleRegistration, error)
-	GetUnconfirmedRegistrations(beforeDate time.Time) ([]RambleRegistration, error)
+	GetUnconfirmedRegistrations(deadlineBefore time.Time, rambleDateOnOrBefore time.Time) ([]RambleRegistration, error)
 }
 
 type rambleRegistrationRepository struct {
@@ -339,14 +339,18 @@ func (r *rambleRegistrationRepository) GetRegistrationsRequiringConfirmation(bef
 	return registrations, err
 }
 
-func (r *rambleRegistrationRepository) GetUnconfirmedRegistrations(beforeDate time.Time) ([]RambleRegistration, error) {
+func (r *rambleRegistrationRepository) GetUnconfirmedRegistrations(deadlineBefore time.Time, rambleDateOnOrBefore time.Time) ([]RambleRegistration, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	var registrations []RambleRegistration
 	err := r.db.WithContext(ctx).
 		Preload("Ramble").
-		Where("status = ? AND confirmation_deadline IS NOT NULL AND confirmation_deadline < ?", "pending", beforeDate).
+		Joins("JOIN rambles ON rambles.id = ramble_registrations.ramble_id AND rambles.deleted_at IS NULL").
+		Where(
+			"ramble_registrations.status = ? AND ramble_registrations.confirmation_deadline IS NOT NULL AND (ramble_registrations.confirmation_deadline < ? OR rambles.date <= ?)",
+			"pending", deadlineBefore, rambleDateOnOrBefore,
+		).
 		Find(&registrations).Error
 
 	return registrations, err

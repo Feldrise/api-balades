@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"feldrise.com/balade/database/dbmodel"
+	"feldrise.com/balade/pkg/authentication"
 	"feldrise.com/balade/pkg/errors"
 	"feldrise.com/balade/pkg/model"
 	"github.com/go-chi/chi"
@@ -14,11 +15,6 @@ import (
 
 // GetGroup retrieves a specific group by ID
 func (config *Config) GetGroup(w http.ResponseWriter, r *http.Request) {
-	user := config.requireAuthenticatedUser(w, r)
-	if user == nil {
-		return
-	}
-
 	groupIDStr := chi.URLParam(r, "id")
 	groupID, err := strconv.ParseUint(groupIDStr, 10, 32)
 	if err != nil {
@@ -37,8 +33,18 @@ func (config *Config) GetGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !config.requireRambleRegistrationAccess(w, r, user, group.RambleID, "view:all-registrations", "view:registrations:self") {
-		return
+	user := authentication.ForContext(r.Context())
+	if user != nil {
+		canView, err := config.canViewRambleRegistrations(user, group.RambleID)
+		if err != nil {
+			render.Render(w, r, errors.ErrServerError(err))
+			return
+		}
+
+		if !canView && !isGroupMember(user, group) {
+			render.Render(w, r, errors.ErrForbidden("insufficient permissions"))
+			return
+		}
 	}
 
 	render.JSON(w, r, group.ToModel())

@@ -71,9 +71,11 @@ func (s *RegistrationScheduler) processConfirmationRequests() {
 	}
 }
 
-// processUnconfirmedRegistrations releases spots for unconfirmed registrations past the confirmation deadline.
+// processUnconfirmedRegistrations releases spots for unconfirmed registrations once their
+// confirmation deadline has passed, or when the ramble is within the cancellation window.
 func (s *RegistrationScheduler) processUnconfirmedRegistrations() {
-	registrations, err := s.registrationRepo.GetUnconfirmedRegistrations(time.Now())
+	now := time.Now()
+	registrations, err := s.registrationRepo.GetUnconfirmedRegistrations(now, now.Add(confirmationDeadlineBeforeRamble))
 	if err != nil {
 		log.Printf("Error getting unconfirmed registrations: %v", err)
 		return

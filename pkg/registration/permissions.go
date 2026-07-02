@@ -2,6 +2,7 @@ package registration
 
 import (
 	"net/http"
+	"strings"
 
 	"feldrise.com/balade/database/dbmodel"
 	"feldrise.com/balade/pkg/authentication"
@@ -47,6 +48,24 @@ func (config *Config) canBulkRegistrationActions(user *dbmodel.User, rambleID ui
 
 func (config *Config) hasAnyBulkPermission(user *dbmodel.User) bool {
 	return user.HasPermission("bulk:registration-actions") || user.HasPermission("bulk:registration-actions:self")
+}
+
+func isGroupMember(user *dbmodel.User, group *dbmodel.RambleRegistrationGroup) bool {
+	if user == nil || group == nil {
+		return false
+	}
+
+	if strings.EqualFold(group.PrimaryEmail, user.Email) {
+		return true
+	}
+
+	for _, registration := range group.Registrations {
+		if registration.UserID != nil && *registration.UserID == user.ID {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (config *Config) requireAuthenticatedUser(w http.ResponseWriter, r *http.Request) *dbmodel.User {

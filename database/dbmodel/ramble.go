@@ -30,6 +30,8 @@ type Ramble struct {
 	Date                   *time.Time
 	Location               *string
 	MeetingPoint           *string
+	MeetingLatitude        *float64
+	MeetingLongitude       *float64
 	MaxParticipants        *int
 	Difficulty             string `gorm:"not null;default:'Facile'"`
 	EstimatedDuration      *string
@@ -37,6 +39,9 @@ type Ramble struct {
 	Prerequisites          *string
 	CoverImage             *string
 	AdditionalDocumentsURL *string
+
+	// Publication
+	PublishedAt *time.Time
 
 	// Cancellation fields
 	IsCancelled        bool `gorm:"not null;default:false"`
@@ -58,6 +63,14 @@ type Ramble struct {
 
 	// Computed fields (not stored in database)
 	PlacesLeft *int `gorm:"-"`
+}
+
+// IsPublished reports whether the ramble is visible to the public.
+func (rm *Ramble) IsPublished() bool {
+	if rm.PublishedAt == nil {
+		return false
+	}
+	return !rm.PublishedAt.After(time.Now())
 }
 
 // CalculatePlacesLeft computes the number of available places for the ramble
@@ -107,6 +120,8 @@ func (rm Ramble) ToModel() model.Ramble {
 		Date:                   rm.Date,
 		Location:               rm.Location,
 		MeetingPoint:           rm.MeetingPoint,
+		MeetingLatitude:        rm.MeetingLatitude,
+		MeetingLongitude:       rm.MeetingLongitude,
 		MaxParticipants:        rm.MaxParticipants,
 		Prices:                 prices,
 		Difficulty:             rm.Difficulty,
@@ -115,6 +130,7 @@ func (rm Ramble) ToModel() model.Ramble {
 		Prerequisites:          rm.Prerequisites,
 		CoverImage:             rm.CoverImage,
 		AdditionalDocumentsURL: rm.AdditionalDocumentsURL,
+		PublishedAt:            rm.PublishedAt,
 		IsCancelled:            rm.IsCancelled,
 		CancellationDate:       rm.CancellationDate,
 		CancellationReason:     rm.CancellationReason,
@@ -141,11 +157,12 @@ type RambleFilter struct {
 	Search      *string    // Search in title, description, location
 	DateFrom    *time.Time // Filter rambles from this date
 	DateTo      *time.Time // Filter rambles to this date
-	GuideID     *uint      // Filter rambles by specific guide
+	GuideID             *uint // Filter rambles by specific guide
+	IncludeUnpublished  bool  // When false, only return publicly visible rambles
 }
 
 type RambleRepository interface {
-	FindByID(id uint) (*Ramble, error)
+	FindByID(id uint, includeUnpublished bool) (*Ramble, error)
 	FindAll(filter *RambleFilter) ([]Ramble, error)
 	Create(ramble *Ramble) (*Ramble, error)
 	Update(ramble *Ramble, updateAssociations bool) (*Ramble, error)
@@ -160,12 +177,20 @@ func NewRambleRepository(db *gorm.DB) RambleRepository {
 	return &rambleRepository{db: db}
 }
 
-func (r *rambleRepository) FindByID(id uint) (*Ramble, error) {
+func applyPublishedFilter(tx *gorm.DB, includeUnpublished bool) *gorm.DB {
+	if !includeUnpublished {
+		tx = tx.Where("published_at IS NOT NULL AND published_at <= ?", time.Now())
+	}
+	return tx
+}
+
+func (r *rambleRepository) FindByID(id uint, includeUnpublished bool) (*Ramble, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	var ramble Ramble
 	tx := r.db.WithContext(ctx).Model(&ramble)
+	tx = applyPublishedFilter(tx, includeUnpublished)
 
 	tx = tx.Preload("Prices").Preload("Guides").Preload("Registrations").Preload("PaymentGuide")
 
@@ -187,6 +212,12 @@ func (r *rambleRepository) FindAll(filter *RambleFilter) ([]Ramble, error) {
 
 	var rambles []Ramble
 	tx := r.db.WithContext(ctx).Model(&Ramble{})
+
+	includeUnpublished := false
+	if filter != nil {
+		includeUnpublished = filter.IncludeUnpublished
+	}
+	tx = applyPublishedFilter(tx, includeUnpublished)
 
 	if filter != nil {
 		if filter.IsCancelled != nil {

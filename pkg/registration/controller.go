@@ -33,7 +33,7 @@ func (config *Config) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if ramble exists
-	ramble, err := config.RambleRepository.FindByID(data.RambleID)
+	ramble, err := config.RambleRepository.FindByID(data.RambleID, false)
 	if err != nil {
 		render.Render(w, r, errors.ErrServerError(err))
 		return
@@ -46,6 +46,11 @@ func (config *Config) Create(w http.ResponseWriter, r *http.Request) {
 	// Check if ramble is cancelled
 	if ramble.IsCancelled {
 		render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("cannot register for a cancelled ramble")))
+		return
+	}
+
+	if !ramble.IsPublished() {
+		render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("cannot register for an unpublished ramble")))
 		return
 	}
 
@@ -410,7 +415,7 @@ func (config *Config) promoteFromWaitingList(rambleID uint) {
 	}
 
 	// Get ramble details
-	ramble, err := config.RambleRepository.FindByID(rambleID)
+	ramble, err := config.RambleRepository.FindByID(rambleID, true)
 	if err != nil || ramble == nil {
 		return
 	}

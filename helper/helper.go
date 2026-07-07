@@ -306,3 +306,34 @@ func SaveBase64Document(base64Data, basePath, entityType, entityID, prefix strin
 
 	return filename, nil
 }
+
+// CopyRambleUpload copies an uploaded ramble file from one ramble directory to another.
+// Returns the new filename on success.
+func CopyRambleUpload(basePath string, srcRambleID, dstRambleID uint, filename string) (string, error) {
+	srcPath := filepath.Join(basePath, "uploads", "ramble", fmt.Sprintf("%d", srcRambleID), filename)
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read source file: %v", err)
+	}
+
+	ext := filepath.Ext(filename)
+	dstRambleIDStr := fmt.Sprintf("%d", dstRambleID)
+	var dstFilename string
+	if strings.HasPrefix(filename, "document_") {
+		dstFilename = "document_" + dstRambleIDStr + ext
+	} else {
+		dstFilename = dstRambleIDStr + ext
+	}
+
+	dstDir := filepath.Join(basePath, "uploads", "ramble", dstRambleIDStr)
+	if err := os.MkdirAll(dstDir, os.ModePerm); err != nil {
+		return "", fmt.Errorf("failed to create upload directory: %v", err)
+	}
+
+	dstPath := filepath.Join(dstDir, dstFilename)
+	if err := os.WriteFile(dstPath, data, 0644); err != nil {
+		return "", fmt.Errorf("failed to write destination file: %v", err)
+	}
+
+	return dstFilename, nil
+}

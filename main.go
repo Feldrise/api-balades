@@ -8,6 +8,7 @@ import (
 	_ "feldrise.com/balade/docs"
 	"feldrise.com/balade/pkg/authentication"
 	"feldrise.com/balade/pkg/guide"
+	apimiddleware "feldrise.com/balade/pkg/middleware"
 	"feldrise.com/balade/pkg/payment"
 	"feldrise.com/balade/pkg/ramble"
 	"feldrise.com/balade/pkg/registration"
@@ -25,6 +26,7 @@ func Routes(configuration *config.Config) *chi.Mux {
 	router.Use(
 		render.SetContentType(render.ContentTypeJSON),
 		middleware.Recoverer,
+		apimiddleware.MaxBodySize(apimiddleware.DefaultMaxBodySize),
 		authentication.Middelware(configuration),
 	)
 

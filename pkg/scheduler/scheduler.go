@@ -162,7 +162,7 @@ func (s *RegistrationScheduler) promoteFromWaitingList(rambleID uint) {
 	}
 
 	// Get ramble details
-	ramble, err := s.rambleRepo.FindByID(rambleID)
+	ramble, err := s.rambleRepo.FindByID(rambleID, true)
 	if err != nil || ramble == nil {
 		return
 	}

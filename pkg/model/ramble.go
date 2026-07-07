@@ -22,6 +22,8 @@ type Ramble struct {
 	Date                   *time.Time    `json:"date,omitempty"`
 	Location               *string       `json:"location,omitempty"`
 	MeetingPoint           *string       `json:"meeting_point,omitempty"`
+	MeetingLatitude        *float64      `json:"meeting_latitude,omitempty"`
+	MeetingLongitude       *float64      `json:"meeting_longitude,omitempty"`
 	MaxParticipants        *int          `json:"max_participants,omitempty"`
 	Prices                 []RamblePrice `json:"prices"`
 	Difficulty             string        `json:"difficulty"`
@@ -30,6 +32,7 @@ type Ramble struct {
 	Prerequisites          *string       `json:"prerequisites,omitempty"`
 	CoverImage             *string       `json:"cover_image,omitempty"`
 	AdditionalDocumentsURL *string       `json:"additional_documents_url,omitempty"`
+	PublishedAt            *time.Time    `json:"published_at,omitempty"`
 	IsCancelled            bool          `json:"is_cancelled"`
 	CancellationDate       *time.Time    `json:"cancellation_date,omitempty"`
 	CancellationReason     *string       `json:"cancellation_reason,omitempty"`
@@ -50,6 +53,8 @@ type RambleCreatePayload struct {
 	Date                     *time.Time    `json:"date,omitempty"`
 	Location                 *string       `json:"location,omitempty"`
 	MeetingPoint             *string       `json:"meeting_point,omitempty"`
+	MeetingLatitude          *float64      `json:"meeting_latitude,omitempty"`
+	MeetingLongitude         *float64      `json:"meeting_longitude,omitempty"`
 	MaxParticipants          *int          `json:"max_participants,omitempty"`
 	Difficulty               *string       `json:"difficulty" binding:"required"`
 	EstimatedDuration        *string       `json:"estimated_duration,omitempty"` // store as HH:MM:SS
@@ -64,6 +69,8 @@ type RambleCreatePayload struct {
 	PaymentGuideID  *uint `json:"payment_guide_id,omitempty"`
 	PaymentEnabled  *bool `json:"payment_enabled,omitempty"`
 	PaymentRequired *bool `json:"payment_required,omitempty"`
+	PublishedAt     *time.Time `json:"published_at,omitempty"`
+	IsDraft         *bool      `json:"is_draft,omitempty"`
 } // @name RambleCreatePayload
 
 func (rb *RambleCreatePayload) Bind(r *http.Request) error {
@@ -83,6 +90,15 @@ func (rb *RambleCreatePayload) Bind(r *http.Request) error {
 		return errors.New("at least one price is required")
 	}
 
+	return nil
+}
+
+type RambleDuplicatePayload struct {
+	Date  *time.Time `json:"date,omitempty"`
+	Title *string    `json:"title,omitempty"`
+} // @name RambleDuplicatePayload
+
+func (rd *RambleDuplicatePayload) Bind(r *http.Request) error {
 	return nil
 }
 

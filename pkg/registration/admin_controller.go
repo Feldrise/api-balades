@@ -603,7 +603,7 @@ func (config *Config) updateRegistrationStatus(registration *dbmodel.RambleRegis
 // sendAdminConfirmationEmail sends a confirmation email when admin confirms a registration
 func (config *Config) sendAdminConfirmationEmail(registration *dbmodel.RambleRegistration) {
 	// Load the ramble with all necessary data
-	ramble, err := config.RambleRepository.FindByID(registration.RambleID)
+	ramble, err := config.RambleRepository.FindByID(registration.RambleID, true)
 	if err != nil || ramble == nil {
 		fmt.Printf("Failed to load ramble for admin confirmation email: %v\n", err)
 		return

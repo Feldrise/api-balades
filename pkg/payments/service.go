@@ -72,7 +72,7 @@ func (s *paymentService) CreatePaymentForRegistration(registrationID uint, price
 	}
 
 	// Get ramble
-	ramble, err := s.rambleRepo.FindByID(registration.RambleID)
+	ramble, err := s.rambleRepo.FindByID(registration.RambleID, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find ramble: %w", err)
 	}
@@ -173,7 +173,7 @@ func (s *paymentService) CreatePaymentForGroup(groupID uint, priceLabel string, 
 	}
 
 	// Get ramble
-	ramble, err := s.rambleRepo.FindByID(group.RambleID)
+	ramble, err := s.rambleRepo.FindByID(group.RambleID, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find ramble: %w", err)
 	}

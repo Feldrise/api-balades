@@ -149,17 +149,14 @@ func (config *Config) Create(w http.ResponseWriter, r *http.Request) {
 		guideID := fmt.Sprintf("%d", dbGuide.ID)
 		filename, err := helper.SaveBase64Image(*payload.AvatarBase64, config.Constants.DataPath, "guide", guideID)
 		if err != nil {
-			// Log the error but don't fail the creation
-			// You might want to add proper logging here
-			fmt.Printf("Failed to save guide avatar: %v\n", err)
-		} else {
-			// Update the guide with the avatar filename
-			dbGuide.Avatar = &filename
-			dbGuide, err = config.GuideRepository.Update(dbGuide)
-			if err != nil {
-				// Log the error but don't fail the creation
-				fmt.Printf("Failed to update guide with avatar: %v\n", err)
-			}
+			render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("failed to save avatar: %w", err)))
+			return
+		}
+		dbGuide.Avatar = &filename
+		dbGuide, err = config.GuideRepository.Update(dbGuide)
+		if err != nil {
+			render.Render(w, r, errors.ErrServerError(err))
+			return
 		}
 	}
 
@@ -221,21 +218,24 @@ func (config *Config) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var avatarBase64 string
+	if avatarInterface, exists := data["avatar_base64"]; exists {
+		if avatarStr, ok := avatarInterface.(string); ok {
+			avatarBase64 = avatarStr
+		}
+	}
+	delete(data, "avatar_base64")
+
 	helper.ApplyChanges(data, dbGuide)
 
-	// Handle avatar upload if provided
-	if avatarInterface, exists := data["avatar_base64"]; exists {
-		if avatarStr, ok := avatarInterface.(string); ok && avatarStr != "" {
-			guideID := fmt.Sprintf("%d", dbGuide.ID)
-			filename, err := helper.SaveBase64Image(avatarStr, config.Constants.DataPath, "guide", guideID)
-			if err != nil {
-				// Log the error but don't fail the update
-				fmt.Printf("Failed to save guide avatar: %v\n", err)
-			} else {
-				// Update the guide with the avatar filename
-				dbGuide.Avatar = &filename
-			}
+	if avatarBase64 != "" {
+		guideID := fmt.Sprintf("%d", dbGuide.ID)
+		filename, err := helper.SaveBase64Image(avatarBase64, config.Constants.DataPath, "guide", guideID)
+		if err != nil {
+			render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("failed to save avatar: %w", err)))
+			return
 		}
+		dbGuide.Avatar = &filename
 	}
 
 	dbGuide, err = config.GuideRepository.Update(dbGuide)
@@ -604,18 +604,24 @@ func (config *Config) updateGuideFromRequest(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	var avatarBase64 string
+	if avatarInterface, exists := data["avatar_base64"]; exists {
+		if avatarStr, ok := avatarInterface.(string); ok {
+			avatarBase64 = avatarStr
+		}
+	}
+	delete(data, "avatar_base64")
+
 	helper.ApplyChanges(data, dbGuide)
 
-	if avatarInterface, exists := data["avatar_base64"]; exists {
-		if avatarStr, ok := avatarInterface.(string); ok && avatarStr != "" {
-			guideID := fmt.Sprintf("%d", dbGuide.ID)
-			filename, err := helper.SaveBase64Image(avatarStr, config.Constants.DataPath, "guide", guideID)
-			if err != nil {
-				fmt.Printf("Failed to save guide avatar: %v\n", err)
-			} else {
-				dbGuide.Avatar = &filename
-			}
+	if avatarBase64 != "" {
+		guideID := fmt.Sprintf("%d", dbGuide.ID)
+		filename, err := helper.SaveBase64Image(avatarBase64, config.Constants.DataPath, "guide", guideID)
+		if err != nil {
+			render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("failed to save avatar: %w", err)))
+			return
 		}
+		dbGuide.Avatar = &filename
 	}
 
 	dbGuide, err = config.GuideRepository.Update(dbGuide)

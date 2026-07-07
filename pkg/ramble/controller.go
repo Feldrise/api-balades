@@ -39,7 +39,9 @@ func (config *Config) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbRamble, err := config.RambleRepository.FindByID(uint(idUint))
+	includeUnpublished := canIncludeUnpublished(r)
+
+	dbRamble, err := config.RambleRepository.FindByID(uint(idUint), includeUnpublished)
 
 	if err != nil {
 		render.Render(w, r, errors.ErrServerError(err))
@@ -66,6 +68,7 @@ func (config *Config) Get(w http.ResponseWriter, r *http.Request) {
 // @Param date_from query string false "Filter rambles from this date (RFC3339 format)"
 // @Param date_to query string false "Filter rambles to this date (RFC3339 format)"
 // @Param guide_id query int false "Filter rambles by specific guide ID"
+// @Param include_unpublished query boolean false "Include unpublished rambles (requires create:ramble or update:ramble permission)"
 // @Success 200 {array} Ramble
 // @Failure 400 {string} string "bad request"
 // @Failure 401 {string} string "unauthorized"
@@ -73,11 +76,11 @@ func (config *Config) Get(w http.ResponseWriter, r *http.Request) {
 // @Router /rambles [get]
 func (config *Config) GetAll(w http.ResponseWriter, r *http.Request) {
 	queryParams := r.URL.Query()
-	var filter *dbmodel.RambleFilter
+	filter := &dbmodel.RambleFilter{
+		IncludeUnpublished: canIncludeUnpublished(r),
+	}
 
-	// Initialize filter if any parameters are provided
 	if len(queryParams) > 0 {
-		filter = &dbmodel.RambleFilter{}
 
 		if isCancelledStr := queryParams.Get("is_cancelled"); isCancelledStr != "" {
 			if isCancelled, err := strconv.ParseBool(isCancelledStr); err == nil {
@@ -187,6 +190,16 @@ func (config *Config) Create(w http.ResponseWriter, r *http.Request) {
 		isPaymentRequired = *payload.PaymentRequired
 	}
 
+	var publishedAt *time.Time
+	if payload.IsDraft != nil && *payload.IsDraft {
+		publishedAt = nil
+	} else if payload.PublishedAt != nil {
+		publishedAt = payload.PublishedAt
+	} else {
+		now := time.Now()
+		publishedAt = &now
+	}
+
 	dbRamble := &dbmodel.Ramble{
 		Title:             *payload.Title,
 		Description:       payload.Description,
@@ -194,11 +207,14 @@ func (config *Config) Create(w http.ResponseWriter, r *http.Request) {
 		Date:              payload.Date,
 		Location:          payload.Location,
 		MeetingPoint:      payload.MeetingPoint,
+		MeetingLatitude:   payload.MeetingLatitude,
+		MeetingLongitude:  payload.MeetingLongitude,
 		MaxParticipants:   payload.MaxParticipants,
 		Difficulty:        *payload.Difficulty,
 		EstimatedDuration: payload.EstimatedDuration,
 		EquipmentNeeded:   payload.EquipmentNeeded,
 		Prerequisites:     payload.Prerequisites,
+		PublishedAt:       publishedAt,
 		PaymentEnabled:    isPaymentEnable,
 		PaymentRequired:   isPaymentRequired,
 		PaymentGuideID:    payload.PaymentGuideID,
@@ -248,12 +264,10 @@ func (config *Config) Create(w http.ResponseWriter, r *http.Request) {
 		rambleID := fmt.Sprintf("%d", dbRamble.ID)
 		filename, err := helper.SaveBase64Image(*payload.CoverImageBase64, config.Constants.DataPath, "ramble", rambleID)
 		if err != nil {
-			// Log the error but don't fail the creation
-			fmt.Printf("Failed to save ramble cover image: %v\n", err)
-		} else {
-			// Update the ramble with the cover image filename
-			dbRamble.CoverImage = &filename
+			render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("failed to save cover image: %w", err)))
+			return
 		}
+		dbRamble.CoverImage = &filename
 	}
 
 	// Handle additional document upload if provided
@@ -261,12 +275,10 @@ func (config *Config) Create(w http.ResponseWriter, r *http.Request) {
 		rambleID := fmt.Sprintf("%d", dbRamble.ID)
 		filename, err := helper.SaveBase64Document(*payload.AdditionalDocumentBase64, config.Constants.DataPath, "ramble", rambleID, "document_")
 		if err != nil {
-			// Log the error but don't fail the creation
-			fmt.Printf("Failed to save ramble additional document: %v\n", err)
-		} else {
-			// Update the ramble with the additional document filename
-			dbRamble.AdditionalDocumentsURL = &filename
+			render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("failed to save additional document: %w", err)))
+			return
 		}
+		dbRamble.AdditionalDocumentsURL = &filename
 	}
 
 	// Update the ramble if any files were uploaded
@@ -274,8 +286,8 @@ func (config *Config) Create(w http.ResponseWriter, r *http.Request) {
 		(payload.AdditionalDocumentBase64 != nil && *payload.AdditionalDocumentBase64 != "") {
 		dbRamble, err = config.RambleRepository.Update(dbRamble, false)
 		if err != nil {
-			// Log the error but don't fail the creation
-			fmt.Printf("Failed to update ramble with file URLs: %v\n", err)
+			render.Render(w, r, errors.ErrServerError(err))
+			return
 		}
 	}
 
@@ -322,7 +334,7 @@ func (config *Config) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbRamble, err := config.RambleRepository.FindByID(uint(idUint))
+	dbRamble, err := config.RambleRepository.FindByID(uint(idUint), true)
 	if err != nil {
 		render.Render(w, r, errors.ErrServerError(err))
 		return
@@ -350,36 +362,43 @@ func (config *Config) Update(w http.ResponseWriter, r *http.Request) {
 		delete(data, "guide_ids")
 	}
 
-	helper.ApplyChanges(data, dbRamble)
-
-	// Handle cover image upload if provided
+	var coverImageBase64 string
 	if coverImageInterface, exists := data["cover_image_base64"]; exists {
-		if coverImageStr, ok := coverImageInterface.(string); ok && coverImageStr != "" {
-			rambleID := fmt.Sprintf("%d", dbRamble.ID)
-			filename, err := helper.SaveBase64Image(coverImageStr, config.Constants.DataPath, "ramble", rambleID)
-			if err != nil {
-				// Log the error but don't fail the update
-				fmt.Printf("Failed to save ramble cover image: %v\n", err)
-			} else {
-				// Update the ramble with the cover image filename
-				dbRamble.CoverImage = &filename
-			}
+		if coverImageStr, ok := coverImageInterface.(string); ok {
+			coverImageBase64 = coverImageStr
 		}
 	}
 
-	// Handle additional document upload if provided
+	var additionalDocumentBase64 string
 	if additionalDocInterface, exists := data["additional_document_base64"]; exists {
-		if additionalDocStr, ok := additionalDocInterface.(string); ok && additionalDocStr != "" {
-			rambleID := fmt.Sprintf("%d", dbRamble.ID)
-			filename, err := helper.SaveBase64Document(additionalDocStr, config.Constants.DataPath, "ramble", rambleID, "document_")
-			if err != nil {
-				// Log the error but don't fail the update
-				fmt.Printf("Failed to save ramble additional document: %v\n", err)
-			} else {
-				// Update the ramble with the additional document filename
-				dbRamble.AdditionalDocumentsURL = &filename
-			}
+		if additionalDocStr, ok := additionalDocInterface.(string); ok {
+			additionalDocumentBase64 = additionalDocStr
 		}
+	}
+
+	delete(data, "cover_image_base64")
+	delete(data, "additional_document_base64")
+
+	helper.ApplyChanges(data, dbRamble)
+
+	if coverImageBase64 != "" {
+		rambleID := fmt.Sprintf("%d", dbRamble.ID)
+		filename, err := helper.SaveBase64Image(coverImageBase64, config.Constants.DataPath, "ramble", rambleID)
+		if err != nil {
+			render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("failed to save cover image: %w", err)))
+			return
+		}
+		dbRamble.CoverImage = &filename
+	}
+
+	if additionalDocumentBase64 != "" {
+		rambleID := fmt.Sprintf("%d", dbRamble.ID)
+		filename, err := helper.SaveBase64Document(additionalDocumentBase64, config.Constants.DataPath, "ramble", rambleID, "document_")
+		if err != nil {
+			render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("failed to save additional document: %w", err)))
+			return
+		}
+		dbRamble.AdditionalDocumentsURL = &filename
 	}
 
 	dbRamble, err = config.RambleRepository.Update(dbRamble, true)
@@ -389,6 +408,126 @@ func (config *Config) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	render.JSON(w, r, dbRamble.ToModel())
+}
+
+// Duplicate godoc
+// @Summary Duplicate a ramble
+// @Description Create a copy of an existing ramble with a new date. The copy starts as an unpublished draft.
+// @ID duplicate-ramble
+// @Accept json
+// @Produce json
+// @Param id path int true "Ramble ID"
+// @Param payload body model.RambleDuplicatePayload false "Optional overrides for the duplicate"
+// @Success 201 {object} model.Ramble
+// @Failure 400 {string} string "bad request"
+// @Failure 401 {string} string "unauthorized"
+// @Failure 404 {string} string "not found"
+// @Failure 500 {string} string "internal server error"
+// @Router /rambles/{id}/duplicate [post]
+func (config *Config) Duplicate(w http.ResponseWriter, r *http.Request) {
+	loggedUser := authentication.ForContext(r.Context())
+	if loggedUser == nil {
+		render.Render(w, r, errors.ErrUnauthorized("You must be logged in to access this resource"))
+		return
+	}
+
+	id := chi.URLParam(r, "id")
+	idUint, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return
+	}
+
+	var payload model.RambleDuplicatePayload
+	if r.ContentLength > 0 {
+		if err := render.Bind(r, &payload); err != nil {
+			render.Render(w, r, errors.ErrInvalidRequest(err))
+			return
+		}
+	}
+
+	sourceRamble, err := config.RambleRepository.FindByID(uint(idUint), true)
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return
+	}
+	if sourceRamble == nil {
+		render.Render(w, r, errors.ErrNotFound())
+		return
+	}
+
+	title := sourceRamble.Title + " (copie)"
+	if payload.Title != nil && *payload.Title != "" {
+		title = *payload.Title
+	}
+
+	newRamble := &dbmodel.Ramble{
+		Title:             title,
+		Description:       sourceRamble.Description,
+		Type:              sourceRamble.Type,
+		Date:              payload.Date,
+		Location:          sourceRamble.Location,
+		MeetingPoint:      sourceRamble.MeetingPoint,
+		MeetingLatitude:   sourceRamble.MeetingLatitude,
+		MeetingLongitude:  sourceRamble.MeetingLongitude,
+		MaxParticipants:   sourceRamble.MaxParticipants,
+		Difficulty:        sourceRamble.Difficulty,
+		EstimatedDuration: sourceRamble.EstimatedDuration,
+		EquipmentNeeded:   sourceRamble.EquipmentNeeded,
+		Prerequisites:     sourceRamble.Prerequisites,
+		PaymentEnabled:    sourceRamble.PaymentEnabled,
+		PaymentRequired:   sourceRamble.PaymentRequired,
+		PaymentGuideID:    sourceRamble.PaymentGuideID,
+		PublishedAt:       nil,
+		Prices:            make([]dbmodel.RamblePrice, len(sourceRamble.Prices)),
+		Guides:            make([]dbmodel.Guide, len(sourceRamble.Guides)),
+	}
+
+	for i, price := range sourceRamble.Prices {
+		newRamble.Prices[i] = dbmodel.RamblePrice{
+			Label:  price.Label,
+			Amount: price.Amount,
+		}
+	}
+
+	for i, guide := range sourceRamble.Guides {
+		newRamble.Guides[i] = dbmodel.Guide{Model: gorm.Model{ID: guide.ID}}
+	}
+
+	createdRamble, err := config.RambleRepository.Create(newRamble)
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return
+	}
+
+	if sourceRamble.CoverImage != nil && *sourceRamble.CoverImage != "" {
+		filename, err := helper.CopyRambleUpload(config.Constants.DataPath, sourceRamble.ID, createdRamble.ID, *sourceRamble.CoverImage)
+		if err != nil {
+			render.Render(w, r, errors.ErrServerError(fmt.Errorf("failed to copy cover image: %w", err)))
+			return
+		}
+		createdRamble.CoverImage = &filename
+	}
+
+	if sourceRamble.AdditionalDocumentsURL != nil && *sourceRamble.AdditionalDocumentsURL != "" {
+		filename, err := helper.CopyRambleUpload(config.Constants.DataPath, sourceRamble.ID, createdRamble.ID, *sourceRamble.AdditionalDocumentsURL)
+		if err != nil {
+			render.Render(w, r, errors.ErrServerError(fmt.Errorf("failed to copy additional document: %w", err)))
+			return
+		}
+		createdRamble.AdditionalDocumentsURL = &filename
+	}
+
+	if createdRamble.CoverImage != nil || createdRamble.AdditionalDocumentsURL != nil {
+		createdRamble, err = config.RambleRepository.Update(createdRamble, false)
+		if err != nil {
+			render.Render(w, r, errors.ErrServerError(err))
+			return
+		}
+	}
+
+	render.Status(r, http.StatusCreated)
+	render.JSON(w, r, createdRamble.ToModel())
 }
 
 // Delete godoc
@@ -418,7 +557,7 @@ func (config *Config) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbRamble, err := config.RambleRepository.FindByID(uint(idUint))
+	dbRamble, err := config.RambleRepository.FindByID(uint(idUint), true)
 	if err != nil {
 		render.Render(w, r, errors.ErrServerError(err))
 		return
@@ -475,7 +614,7 @@ func (config *Config) Cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbRamble, err := config.RambleRepository.FindByID(uint(idUint))
+	dbRamble, err := config.RambleRepository.FindByID(uint(idUint), true)
 	if err != nil {
 		render.Render(w, r, errors.ErrServerError(err))
 		return
@@ -581,4 +720,17 @@ func formatCancellationReason(reason *string) string {
 		return "Aucune raison spécifiée"
 	}
 	return *reason
+}
+
+func canIncludeUnpublished(r *http.Request) bool {
+	if r.URL.Query().Get("include_unpublished") != "true" {
+		return false
+	}
+
+	loggedUser := authentication.ForContext(r.Context())
+	if loggedUser == nil {
+		return false
+	}
+
+	return loggedUser.HasPermission("create:ramble") || loggedUser.HasPermission("update:ramble")
 }

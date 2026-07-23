@@ -273,14 +273,15 @@ func (config *Config) AdminGetAllGroups(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if !user.HasPermission("view:all-registrations") {
-		if filter.RambleID == nil {
-			render.Render(w, r, errors.ErrForbidden("ramble_id is required"))
+		rambleIDs, ok := config.resolveGuideRambleScope(w, r, user, filter.RambleID, "view:all-registrations", "view:registrations:self")
+		if !ok {
 			return
 		}
-
-		if !config.requireRambleRegistrationAccess(w, r, user, *filter.RambleID, "view:all-registrations", "view:registrations:self") {
-			return
+		if rambleIDs == nil {
+			rambleIDs = []uint{}
 		}
+		filter.RambleIDs = rambleIDs
+		filter.RambleID = nil
 	}
 
 	if status := r.URL.Query().Get("status"); status != "" {

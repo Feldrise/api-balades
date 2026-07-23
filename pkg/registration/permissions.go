@@ -91,3 +91,39 @@ func (config *Config) requireRambleRegistrationAccess(w http.ResponseWriter, r *
 
 	return true
 }
+
+// resolveGuideRambleScope returns ramble IDs a self-scoped guide may access.
+// When rambleID is set, the slice contains only that ID if owned (or forbidden).
+// When rambleID is nil, all assigned ramble IDs are returned (may be empty).
+// ok is false when the caller should stop (403 already rendered, or missing self perm).
+func (config *Config) resolveGuideRambleScope(w http.ResponseWriter, r *http.Request, user *dbmodel.User, rambleID *uint, blanketPerm, selfPerm string) (rambleIDs []uint, ok bool) {
+	if user.HasPermission(blanketPerm) {
+		if rambleID != nil {
+			return []uint{*rambleID}, true
+		}
+		return nil, true
+	}
+
+	if !user.HasPermission(selfPerm) {
+		render.Render(w, r, errors.ErrForbidden("insufficient permissions"))
+		return nil, false
+	}
+
+	ownedIDs, err := config.GuideRepository.FindRambleIDsOwnedByUser(user.ID)
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return nil, false
+	}
+
+	if rambleID != nil {
+		for _, id := range ownedIDs {
+			if id == *rambleID {
+				return []uint{*rambleID}, true
+			}
+		}
+		render.Render(w, r, errors.ErrForbidden("insufficient permissions"))
+		return nil, false
+	}
+
+	return ownedIDs, true
+}

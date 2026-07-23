@@ -56,6 +56,7 @@ func (grg *RambleRegistrationGroup) ToModel() *model.RambleRegistrationGroup {
 
 type RambleRegistrationGroupFilter struct {
 	RambleID     *uint
+	RambleIDs    []uint // When set, restrict to these ramble IDs (empty = no matches)
 	PrimaryEmail *string
 	Status       *string
 }
@@ -108,6 +109,13 @@ func (r *rambleRegistrationGroupRepository) FindAll(filter *RambleRegistrationGr
 	if filter != nil {
 		if filter.RambleID != nil {
 			tx = tx.Where("ramble_id = ?", *filter.RambleID)
+		}
+		if filter.RambleIDs != nil {
+			if len(filter.RambleIDs) == 0 {
+				tx = tx.Where("1 = 0")
+			} else {
+				tx = tx.Where("ramble_id IN ?", filter.RambleIDs)
+			}
 		}
 		if filter.PrimaryEmail != nil {
 			tx = tx.Where("primary_email = ?", *filter.PrimaryEmail)

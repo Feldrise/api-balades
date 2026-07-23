@@ -71,11 +71,12 @@ func (rr *RambleRegistration) ToModel() *model.RambleRegistration {
 }
 
 type RambleRegistrationFilter struct {
-	RambleID *uint
-	UserID   *uint
-	Email    *string
-	Status   *string
-	GroupID  *uint
+	RambleID  *uint
+	RambleIDs []uint // When set, restrict to these ramble IDs (empty = no matches)
+	UserID    *uint
+	Email     *string
+	Status    *string
+	GroupID   *uint
 	// New advanced filters
 	DateFrom    *time.Time
 	DateTo      *time.Time
@@ -135,40 +136,7 @@ func (r *rambleRegistrationRepository) FindAll(filter *RambleRegistrationFilter)
 	tx := r.db.WithContext(ctx).Model(&RambleRegistration{})
 
 	if filter != nil {
-		if filter.RambleID != nil {
-			tx = tx.Where("ramble_id = ?", *filter.RambleID)
-		}
-		if filter.UserID != nil {
-			tx = tx.Where("user_id = ?", *filter.UserID)
-		}
-		if filter.Email != nil {
-			tx = tx.Where("email = ?", *filter.Email)
-		}
-		if filter.Status != nil {
-			tx = tx.Where("status = ?", *filter.Status)
-		}
-		if filter.GroupID != nil {
-			tx = tx.Where("group_id = ?", *filter.GroupID)
-		}
-
-		// New advanced filters
-		if filter.DateFrom != nil {
-			tx = tx.Where("registration_date >= ?", *filter.DateFrom)
-		}
-		if filter.DateTo != nil {
-			tx = tx.Where("registration_date <= ?", *filter.DateTo)
-		}
-		if filter.Search != nil && *filter.Search != "" {
-			searchTerm := "%" + *filter.Search + "%"
-			tx = tx.Where("(first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ?)", searchTerm, searchTerm, searchTerm)
-		}
-		if filter.RambleTitle != nil && *filter.RambleTitle != "" {
-			tx = tx.Joins("JOIN rambles ON rambles.id = ramble_registrations.ramble_id").
-				Where("rambles.title ILIKE ?", "%"+*filter.RambleTitle+"%")
-		}
-		if len(filter.Statuses) > 0 {
-			tx = tx.Where("status IN ?", filter.Statuses)
-		}
+		tx = applyRambleRegistrationFilter(tx, filter)
 
 		// Sorting
 		sortBy := "created_at"
@@ -216,44 +184,54 @@ func (r *rambleRegistrationRepository) CountAll(filter *RambleRegistrationFilter
 	tx := r.db.WithContext(ctx).Model(&RambleRegistration{})
 
 	if filter != nil {
-		if filter.RambleID != nil {
-			tx = tx.Where("ramble_id = ?", *filter.RambleID)
-		}
-		if filter.UserID != nil {
-			tx = tx.Where("user_id = ?", *filter.UserID)
-		}
-		if filter.Email != nil {
-			tx = tx.Where("email = ?", *filter.Email)
-		}
-		if filter.Status != nil {
-			tx = tx.Where("status = ?", *filter.Status)
-		}
-		if filter.GroupID != nil {
-			tx = tx.Where("group_id = ?", *filter.GroupID)
-		}
-
-		// New advanced filters
-		if filter.DateFrom != nil {
-			tx = tx.Where("registration_date >= ?", *filter.DateFrom)
-		}
-		if filter.DateTo != nil {
-			tx = tx.Where("registration_date <= ?", *filter.DateTo)
-		}
-		if filter.Search != nil && *filter.Search != "" {
-			searchTerm := "%" + *filter.Search + "%"
-			tx = tx.Where("(first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ?)", searchTerm, searchTerm, searchTerm)
-		}
-		if filter.RambleTitle != nil && *filter.RambleTitle != "" {
-			tx = tx.Joins("JOIN rambles ON rambles.id = ramble_registrations.ramble_id").
-				Where("rambles.title ILIKE ?", "%"+*filter.RambleTitle+"%")
-		}
-		if len(filter.Statuses) > 0 {
-			tx = tx.Where("status IN ?", filter.Statuses)
-		}
+		tx = applyRambleRegistrationFilter(tx, filter)
 	}
 
 	err := tx.Count(&count).Error
 	return count, err
+}
+
+func applyRambleRegistrationFilter(tx *gorm.DB, filter *RambleRegistrationFilter) *gorm.DB {
+	if filter.RambleID != nil {
+		tx = tx.Where("ramble_id = ?", *filter.RambleID)
+	}
+	if filter.RambleIDs != nil {
+		if len(filter.RambleIDs) == 0 {
+			tx = tx.Where("1 = 0")
+		} else {
+			tx = tx.Where("ramble_id IN ?", filter.RambleIDs)
+		}
+	}
+	if filter.UserID != nil {
+		tx = tx.Where("user_id = ?", *filter.UserID)
+	}
+	if filter.Email != nil {
+		tx = tx.Where("email = ?", *filter.Email)
+	}
+	if filter.Status != nil {
+		tx = tx.Where("status = ?", *filter.Status)
+	}
+	if filter.GroupID != nil {
+		tx = tx.Where("group_id = ?", *filter.GroupID)
+	}
+	if filter.DateFrom != nil {
+		tx = tx.Where("registration_date >= ?", *filter.DateFrom)
+	}
+	if filter.DateTo != nil {
+		tx = tx.Where("registration_date <= ?", *filter.DateTo)
+	}
+	if filter.Search != nil && *filter.Search != "" {
+		searchTerm := "%" + *filter.Search + "%"
+		tx = tx.Where("(first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ?)", searchTerm, searchTerm, searchTerm)
+	}
+	if filter.RambleTitle != nil && *filter.RambleTitle != "" {
+		tx = tx.Joins("JOIN rambles ON rambles.id = ramble_registrations.ramble_id").
+			Where("rambles.title ILIKE ?", "%"+*filter.RambleTitle+"%")
+	}
+	if len(filter.Statuses) > 0 {
+		tx = tx.Where("status IN ?", filter.Statuses)
+	}
+	return tx
 }
 
 func (r *rambleRegistrationRepository) Create(registration *RambleRegistration) (*RambleRegistration, error) {

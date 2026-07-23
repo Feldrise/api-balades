@@ -40,22 +40,24 @@ func (config *Config) AdminGetAllRegistrations(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if !user.HasPermission("view:all-registrations") {
-		if filter.RambleID == nil {
-			render.Render(w, r, errors.ErrForbidden("ramble_id is required"))
-			return
-		}
-
-		if !config.requireRambleRegistrationAccess(w, r, user, *filter.RambleID, "view:all-registrations", "view:registrations:self") {
-			return
-		}
-	}
-
 	// Convert to database filter
 	dbFilter, err := convertToDBFilter(filter)
 	if err != nil {
 		render.Render(w, r, errors.ErrInvalidRequest(err))
 		return
+	}
+
+	if !user.HasPermission("view:all-registrations") {
+		rambleIDs, ok := config.resolveGuideRambleScope(w, r, user, filter.RambleID, "view:all-registrations", "view:registrations:self")
+		if !ok {
+			return
+		}
+		// Non-nil (possibly empty) slice scopes to assigned rambles only.
+		if rambleIDs == nil {
+			rambleIDs = []uint{}
+		}
+		dbFilter.RambleIDs = rambleIDs
+		dbFilter.RambleID = nil
 	}
 
 	// Get total count

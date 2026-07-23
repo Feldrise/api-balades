@@ -70,6 +70,7 @@ type GuideRepository interface {
 	FindByID(id uint) (*Guide, error)
 	FindByUserID(userID uint) (*Guide, error)
 	UserOwnsRamble(userID uint, rambleID uint) (bool, error)
+	FindRambleIDsOwnedByUser(userID uint) ([]uint, error)
 	FindAll(filter *GuideFilter) ([]Guide, error)
 	Create(guide *Guide) (*Guide, error)
 	Update(guide *Guide) (*Guide, error)
@@ -109,7 +110,7 @@ func (r *guideRepository) UserOwnsRamble(userID uint, rambleID uint) (bool, erro
 	err := r.db.WithContext(ctx).
 		Table("ramble_guides").
 		Joins("JOIN guides ON guides.id = ramble_guides.guide_id").
-		Where("guides.user_id = ? AND ramble_guides.ramble_id = ? AND guides.deleted_at IS NULL", userID, rambleID).
+		Where("guides.user_id = ? AND ramble_guides.ramble_id = ? AND guides.deleted_at IS NULL AND ramble_guides.deleted_at IS NULL", userID, rambleID).
 		Count(&count).Error
 
 	if err != nil {
@@ -117,6 +118,30 @@ func (r *guideRepository) UserOwnsRamble(userID uint, rambleID uint) (bool, erro
 	}
 
 	return count > 0, nil
+}
+
+// FindRambleIDsOwnedByUser returns ramble IDs where the user's linked guide is assigned.
+func (r *guideRepository) FindRambleIDsOwnedByUser(userID uint) ([]uint, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var rambleIDs []uint
+	err := r.db.WithContext(ctx).
+		Table("ramble_guides").
+		Joins("JOIN guides ON guides.id = ramble_guides.guide_id").
+		Where("guides.user_id = ? AND guides.deleted_at IS NULL AND ramble_guides.deleted_at IS NULL", userID).
+		Distinct().
+		Pluck("ramble_guides.ramble_id", &rambleIDs).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	if rambleIDs == nil {
+		rambleIDs = []uint{}
+	}
+
+	return rambleIDs, nil
 }
 
 func (r *guideRepository) FindByID(id uint) (*Guide, error) {

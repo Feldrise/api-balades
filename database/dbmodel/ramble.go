@@ -250,7 +250,7 @@ func (r *rambleRepository) FindAll(filter *RambleFilter) ([]Ramble, error) {
 		}
 
 		if filter.GuideID != nil {
-			tx = tx.Joins("JOIN ramble_guides ON rambles.id = ramble_guides.ramble_id").
+			tx = tx.Joins("JOIN ramble_guides ON rambles.id = ramble_guides.ramble_id AND ramble_guides.deleted_at IS NULL").
 				Where("ramble_guides.guide_id = ?", *filter.GuideID)
 		}
 	}

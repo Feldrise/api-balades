@@ -95,9 +95,15 @@ type UserFieldsToInclude struct {
 	Roles_Permissions bool
 }
 
+type UserFilter struct {
+	Search *string
+	Limit  int
+}
+
 type UserRepository interface {
 	FindByID(id uint, fieldsToInclude *UserFieldsToInclude) (*User, error)
 	FindByEmail(email string, fieldsToInclude *UserFieldsToInclude) (*User, error)
+	Search(filter *UserFilter) ([]User, error)
 	Create(user *User) (*User, error)
 	Update(user *User) (*User, error)
 	Delete(id uint) error
@@ -144,6 +150,40 @@ func (r *userRepository) FindByID(id uint, fieldsToInclude *UserFieldsToInclude)
 	}
 
 	return &user, nil
+}
+
+func (r *userRepository) Search(filter *UserFilter) ([]User, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var users []User
+	tx := r.db.WithContext(ctx).Model(&User{}).Preload("UserProfile")
+
+	if filter != nil {
+		if filter.Search != nil && *filter.Search != "" {
+			search := "%" + *filter.Search + "%"
+			tx = tx.Joins("LEFT JOIN user_profiles ON user_profiles.user_id = users.id AND user_profiles.deleted_at IS NULL").
+				Where(
+					"users.email ILIKE ? OR user_profiles.first_name ILIKE ? OR user_profiles.last_name ILIKE ?",
+					search, search, search,
+				)
+		}
+
+		limit := filter.Limit
+		if limit <= 0 {
+			limit = 20
+		}
+		tx = tx.Limit(limit)
+	} else {
+		tx = tx.Limit(20)
+	}
+
+	err := tx.Find(&users).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return users, nil
 }
 
 func (r *userRepository) FindByEmail(email string, fieldsToInclude *UserFieldsToInclude) (*User, error) {

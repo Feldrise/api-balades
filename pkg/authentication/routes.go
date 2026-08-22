@@ -16,6 +16,7 @@ func (config *Config) Routes() *chi.Mux {
 	router.Post("/verify-authentication", config.VerifyAuthenticate)
 	router.Put("/{id}", config.Update)
 	router.Get("/check-email", config.CheckIfEmailExists)
+	router.With(RequirePermission("create:user")).Get("/users", config.SearchUsers)
 	router.Get("/me", config.Me)
 
 	return router

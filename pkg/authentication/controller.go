@@ -239,6 +239,42 @@ func (config *Config) Update(w http.ResponseWriter, r *http.Request) {
 	render.JSON(w, r, user.ToModel())
 }
 
+// SearchUsers godoc
+// @Summary Search users
+// @Description Search users by email or name (admin only)
+// @ID search-users
+// @Tags autentication
+// @Param search query string false "Search term"
+// @Success 200 {array} model.User
+// @Failure 401 {string} string "unauthorized"
+// @Failure 403 {string} string "forbidden"
+// @Failure 500 {string} string "internal server error"
+// @Router /authentication/users [get]
+func (config *Config) SearchUsers(w http.ResponseWriter, r *http.Request) {
+	search := r.URL.Query().Get("search")
+
+	filter := &dbmodel.UserFilter{
+		Limit: 20,
+	}
+
+	if search != "" {
+		filter.Search = &search
+	}
+
+	dbUsers, err := config.UserRepository.Search(filter)
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return
+	}
+
+	users := make([]model.User, len(dbUsers))
+	for i, dbUser := range dbUsers {
+		users[i] = *dbUser.ToModel()
+	}
+
+	render.JSON(w, r, users)
+}
+
 // Me godoc
 // @Summary Get the current user
 // @Description Get the current user

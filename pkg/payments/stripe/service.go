@@ -3,13 +3,49 @@ package stripe
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/stripe/stripe-go/v83"
 	"github.com/stripe/stripe-go/v83/paymentintent"
 	"github.com/stripe/stripe-go/v83/refund"
 	"github.com/stripe/stripe-go/v83/webhook"
 )
+
+// RefundRefusedError is Stripe's answer that it made no refund, such as for an
+// amount greater than is left to refund: the same request is refused again.
+type RefundRefusedError struct {
+	Message string
+	// ExceedsRefundable tells that the amount is greater than is left to
+	// refund on the payment.
+	ExceedsRefundable bool
+}
+
+func (e *RefundRefusedError) Error() string {
+	return "stripe refused the refund: " + e.Message
+}
+
+// refundError tells a refund refused by Stripe, answered with a client error,
+// from a failure that leaves unknown whether the refund was made: no answer
+// (timeout, network), a server error, a conflict on the idempotency key of a
+// request still in progress (409), or too many requests (429).
+func refundError(err error) error {
+	var stripeErr *stripe.Error
+	if !errors.As(err, &stripeErr) {
+		return fmt.Errorf("failed to create refund: %w", err)
+	}
+	status := stripeErr.HTTPStatusCode
+	if status < 400 || status >= 500 || status == http.StatusConflict || status == http.StatusTooManyRequests {
+		return fmt.Errorf("failed to create refund: %w", err)
+	}
+	return &RefundRefusedError{
+		Message: stripeErr.Msg,
+		ExceedsRefundable: stripeErr.Param == "amount" ||
+			stripeErr.Code == stripe.ErrorCodeAmountTooLarge ||
+			stripeErr.Code == stripe.ErrorCodeChargeAlreadyRefunded,
+	}
+}
 
 type GuideStripeCredentials struct {
 	AccountID     string
@@ -32,6 +68,8 @@ type StripeService interface {
 	// RefundPayment refunds amount cents of the payment intent, and returns the
 	// amount refunded on it so far, all refunds included, as Stripe knows it.
 	// A refund with the idempotency key of a previous one refunds nothing more.
+	// It fails with a *RefundRefusedError when Stripe answered that it made no
+	// refund; any other failure leaves unknown whether the refund was made.
 	RefundPayment(ctx context.Context, credentials GuideStripeCredentials, paymentIntentID string, amount int64, idempotencyKey string) (int64, error)
 	VerifyWebhookSignature(payload []byte, signature string, secret string) (*stripe.Event, error)
 	ProcessWebhookEvent(event *stripe.Event) (*WebhookEventData, error)
@@ -149,7 +187,7 @@ func (s *stripeService) RefundPayment(ctx context.Context, credentials GuideStri
 	}
 
 	if _, err := refund.New(params); err != nil {
-		return 0, fmt.Errorf("failed to create refund: %w", err)
+		return 0, refundError(err)
 	}
 
 	// The refund replayed for a reused idempotency key is as it was then: the

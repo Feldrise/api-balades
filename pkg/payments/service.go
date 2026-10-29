@@ -56,6 +56,15 @@ var (
 	ErrNothingToPay            = errors.New("nothing to pay for this reservation")
 )
 
+// Errors telling why the payment, as it is once locked, cannot be refunded as
+// requested. Nothing was refunded.
+var (
+	ErrInvalidRefundAmount     = errors.New("the refund must be of at least 1 cent")
+	ErrPaymentNotRefundable    = errors.New("only a succeeded payment can be refunded")
+	ErrRefundExceedsRefundable = errors.New("the refund is greater than is left to refund")
+	ErrRefundRefused           = errors.New("stripe refused the refund")
+)
+
 type PayerInfo struct {
 	Email string
 	Name  string
@@ -409,6 +418,10 @@ func ignoreForeignPayment(eventData *stripe.WebhookEventData, err error) error {
 // even once the charge.refunded webhook recorded it. A refund of another
 // amount, or of the rest (amount nil), settles the pending refund first by
 // retrying it, then is made on what is left to refund.
+//
+// A refund Stripe refused is no longer pending, as Stripe refunded nothing: it
+// does not hold back the next one. A refund whose answer is unknown stays
+// pending.
 func (s *paymentService) RefundPayment(paymentID uint, amount *int64, reason *string) error {
 	settledOther := false
 	for {
@@ -419,11 +432,13 @@ func (s *paymentService) RefundPayment(paymentID uint, amount *int64, reason *st
 		if request == nothingLeftToRefund {
 			return nil
 		}
-		if err := s.settlePendingRefund(paymentID); err != nil {
+		err = s.settlePendingRefund(paymentID)
+		if request != otherRefundPending {
 			return err
 		}
-		if request != otherRefundPending {
-			return nil
+		// The other refund refused is not this one: this one is made on.
+		if err != nil && !errors.Is(err, ErrRefundRefused) && !errors.Is(err, ErrRefundExceedsRefundable) {
+			return err
 		}
 		settledOther = true
 	}
@@ -463,15 +478,21 @@ func (s *paymentService) requestRefund(paymentID uint, amount *int64, settledOth
 			request = nothingLeftToRefund
 			return nil
 		}
+		if payment.Status == "refunded" {
+			return fmt.Errorf("%w: the payment is refunded entirely", ErrRefundExceedsRefundable)
+		}
 		if payment.Status != "succeeded" && payment.Status != "partially_refunded" {
-			return errors.New("can only refund succeeded payments")
+			return ErrPaymentNotRefundable
 		}
 		requested := refundable
 		if amount != nil {
 			requested = *amount
 		}
+		if amount != nil && requested <= 0 {
+			return ErrInvalidRefundAmount
+		}
 		if requested <= 0 || requested > refundable {
-			return fmt.Errorf("the refund must be between 1 and %d cents", refundable)
+			return fmt.Errorf("%w: %d cents left to refund", ErrRefundExceedsRefundable, max(refundable, 0))
 		}
 
 		// Keyed on what is refunded before it, so that two refunds of the
@@ -486,9 +507,11 @@ func (s *paymentService) requestRefund(paymentID uint, amount *int64, settledOth
 // settlePendingRefund makes the pending refund of the payment on Stripe, with
 // its idempotency key, so that it is made once however often it is retried,
 // and records the amount refunded as Stripe knows it, which catches up on a
-// refund not recorded. The refund is no longer pending once Stripe answered.
+// refund not recorded. The refund is no longer pending once Stripe answered,
+// whether it made the refund or refused it.
 func (s *paymentService) settlePendingRefund(paymentID uint) error {
-	return s.paymentRepo.ForPayment(paymentID, func(ctx context.Context, payments dbmodel.PaymentRepository, payment *dbmodel.Payment) error {
+	var refused error
+	err := s.paymentRepo.ForPayment(paymentID, func(ctx context.Context, payments dbmodel.PaymentRepository, payment *dbmodel.Payment) error {
 		if payment == nil {
 			return errors.New("payment not found")
 		}
@@ -501,18 +524,28 @@ func (s *paymentService) settlePendingRefund(paymentID uint) error {
 			return err
 		}
 		refunded, err := s.stripeService.RefundPayment(ctx, credentials, payment.StripePaymentIntentID, *payment.PendingRefundAmount, *payment.PendingRefundKey)
-		if err != nil {
+		var refusal *stripe.RefundRefusedError
+		if errors.As(err, &refusal) {
+			refused = fmt.Errorf("%w: %s", ErrRefundRefused, refusal.Message)
+			if refusal.ExceedsRefundable {
+				refused = fmt.Errorf("%w: %s", ErrRefundExceedsRefundable, refusal.Message)
+			}
+		} else if err != nil {
+			// Stripe may have made the refund: it stays pending.
 			return fmt.Errorf("failed to process refund: %w", err)
-		}
-
-		if _, err := payments.RecordRefundedAmount(payment.StripePaymentIntentID, refunded, time.Now()); err != nil {
+		} else if _, err := payments.RecordRefundedAmount(payment.StripePaymentIntentID, refunded, time.Now()); err != nil {
 			return fmt.Errorf("failed to update payment record: %w", err)
 		}
+
 		if err := payments.SetPendingRefund(payment.ID, nil, nil); err != nil {
 			return fmt.Errorf("failed to update payment record: %w", err)
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	return refused
 }
 
 func (s *paymentService) GetPaymentByID(id uint) (*model.Payment, error) {

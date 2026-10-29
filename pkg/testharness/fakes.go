@@ -116,6 +116,7 @@ type FakeStripeService struct {
 	paymentIntents []CreatedPaymentIntent
 	cancelled      []string
 	refunds        []Refund
+	charged        map[string]int64
 	unavailable    bool
 	cancelFailing  bool
 	creationDelay  time.Duration
@@ -170,7 +171,25 @@ func (s *FakeStripeService) SetUnavailable(unavailable bool) {
 }
 
 func NewFakeStripeService() *FakeStripeService {
-	return &FakeStripeService{}
+	return &FakeStripeService{charged: map[string]int64{}}
+}
+
+// Charge records that amount cents were charged on the payment intent, so that
+// a refund of more than is left to refund on it is refused, as Stripe does.
+func (s *FakeStripeService) Charge(paymentIntentID string, amount int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.charged[paymentIntentID] = amount
+}
+
+// RefundFromDashboard refunds amount cents of the payment intent outside the
+// application, as from the Stripe dashboard.
+func (s *FakeStripeService) RefundFromDashboard(paymentIntentID string, amount int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.refunds = append(s.refunds, Refund{PaymentIntentID: paymentIntentID, Amount: amount})
 }
 
 // respond waits delay, as a slow network does, and fails if ctx ends first.
@@ -286,14 +305,18 @@ func (s *FakeStripeService) CancelPaymentIntent(ctx context.Context, credentials
 func (s *FakeStripeService) RefundPayment(ctx context.Context, credentials stripe.GuideStripeCredentials, paymentIntentID string, amount int64, idempotencyKey string) (int64, error) {
 	s.mu.Lock()
 	delay := s.refundDelay
+	refunded := s.refundedLocked(paymentIntentID)
 	if !slices.ContainsFunc(s.refunds, func(r Refund) bool { return r.IdempotencyKey == idempotencyKey }) {
-		s.refunds = append(s.refunds, Refund{PaymentIntentID: paymentIntentID, Amount: amount, IdempotencyKey: idempotencyKey})
-	}
-	var refunded int64
-	for _, r := range s.refunds {
-		if r.PaymentIntentID == paymentIntentID {
-			refunded += r.Amount
+		// Stripe answers at once that it refunds nothing more than is left.
+		if charged, ok := s.charged[paymentIntentID]; ok && amount > charged-refunded {
+			s.mu.Unlock()
+			return 0, &stripe.RefundRefusedError{
+				Message:           fmt.Sprintf("Refund amount (%d) is greater than unrefunded amount on charge (%d)", amount, charged-refunded),
+				ExceedsRefundable: true,
+			}
 		}
+		s.refunds = append(s.refunds, Refund{PaymentIntentID: paymentIntentID, Amount: amount, IdempotencyKey: idempotencyKey})
+		refunded += amount
 	}
 	s.mu.Unlock()
 
@@ -301,6 +324,17 @@ func (s *FakeStripeService) RefundPayment(ctx context.Context, credentials strip
 		return 0, err
 	}
 	return refunded, nil
+}
+
+// refundedLocked returns the amount refunded so far on the payment intent.
+func (s *FakeStripeService) refundedLocked(paymentIntentID string) int64 {
+	var refunded int64
+	for _, r := range s.refunds {
+		if r.PaymentIntentID == paymentIntentID {
+			refunded += r.Amount
+		}
+	}
+	return refunded
 }
 
 // FakeWebhookSignature is the signature the fake Stripe service accepts for

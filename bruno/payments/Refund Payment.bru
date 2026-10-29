@@ -23,6 +23,8 @@ body:json {
 
 docs {
   Refunds a payment, entirely without amount or partly with an amount in cents up to what is left to refund. Refunds add up in refund_amount: the payment is partially_refunded, then refunded once entirely; the reservation counts its net amount as paid. Restricted to refund:payments or manage:payments.
+
+  Refused, with nothing refunded: 400 `invalid_refund_amount` for an amount below 1 cent; 409 `refund_exceeds_refundable` for more than is left to refund (as recorded, or as Stripe knows it); 409 `payment_not_refundable` for a payment not succeeded; 422 `refund_refused` when Stripe refuses it for another reason. A 500 leaves unknown whether Stripe made the refund: retrying the same amount does not refund it twice.
 }
 
 tests {

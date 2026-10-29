@@ -252,6 +252,7 @@ func (h *Harness) PayReservation(reservationID uint, amount int64) *dbmodel.Paym
 	if err := h.DB.Create(payment).Error; err != nil {
 		h.t.Fatalf("creating payment: %v", err)
 	}
+	h.Stripe.Charge(payment.StripePaymentIntentID, amount)
 
 	return payment
 }

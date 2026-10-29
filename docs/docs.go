@@ -956,7 +956,7 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Bad Request",
+                        "description": "reason: invalid_refund_amount (an amount below 1 cent)",
                         "schema": {
                             "$ref": "#/definitions/ErrResponse"
                         }
@@ -975,6 +975,18 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "reason: refund_exceeds_refundable (more than is left to refund, nothing refunded), payment_not_refundable (the payment is not succeeded)",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "reason: refund_refused (Stripe refused the refund, nothing refunded)",
                         "schema": {
                             "$ref": "#/definitions/ErrResponse"
                         }

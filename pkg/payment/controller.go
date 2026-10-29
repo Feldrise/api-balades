@@ -1,6 +1,7 @@
 package payment
 
 import (
+	stderrors "errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -116,10 +117,12 @@ func (pc *Controller) GetPayment(w http.ResponseWriter, r *http.Request) {
 // @Param id path int true "Payment ID"
 // @Param payload body model.PaymentRefundPayload true "Refund payload"
 // @Success 200 {object} map[string]string
-// @Failure 400 {object} errors.ErrResponse
+// @Failure 400 {object} errors.ErrResponse "reason: invalid_refund_amount (an amount below 1 cent)"
 // @Failure 401 {object} errors.ErrResponse
 // @Failure 403 {object} errors.ErrResponse
 // @Failure 404 {object} errors.ErrResponse
+// @Failure 409 {object} errors.ErrResponse "reason: refund_exceeds_refundable (more than is left to refund, nothing refunded), payment_not_refundable (the payment is not succeeded)"
+// @Failure 422 {object} errors.ErrResponse "reason: refund_refused (Stripe refused the refund, nothing refunded)"
 // @Failure 500 {object} errors.ErrResponse
 // @Router /payments/{id}/refund [post]
 func (pc *Controller) RefundPayment(w http.ResponseWriter, r *http.Request) {
@@ -138,11 +141,26 @@ func (pc *Controller) RefundPayment(w http.ResponseWriter, r *http.Request) {
 
 	err = pc.paymentService.RefundPayment(uint(id), payload.Amount, payload.Reason)
 	if err != nil {
-		render.Render(w, r, errors.ErrServerError(err))
+		render.Render(w, r, refundError(err))
 		return
 	}
 
 	render.JSON(w, r, map[string]string{"message": "Refund processed successfully"})
+}
+
+// refundError reports a refund refused with the reason why.
+func refundError(err error) render.Renderer {
+	switch {
+	case stderrors.Is(err, payments.ErrInvalidRefundAmount):
+		return errors.ErrBusiness(http.StatusBadRequest, "invalid_refund_amount", err.Error())
+	case stderrors.Is(err, payments.ErrRefundExceedsRefundable):
+		return errors.ErrBusiness(http.StatusConflict, "refund_exceeds_refundable", err.Error())
+	case stderrors.Is(err, payments.ErrPaymentNotRefundable):
+		return errors.ErrBusiness(http.StatusConflict, "payment_not_refundable", err.Error())
+	case stderrors.Is(err, payments.ErrRefundRefused):
+		return errors.ErrBusiness(http.StatusUnprocessableEntity, "refund_refused", err.Error())
+	}
+	return errors.ErrServerError(err)
 }
 
 // WebhookHandler handles Stripe webhook events

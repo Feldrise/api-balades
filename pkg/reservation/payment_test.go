@@ -842,6 +842,57 @@ func TestARefundNotRecordedIsCaughtUpByTheNextOne(t *testing.T) {
 	}
 }
 
+func TestARefundRefusedByStripeDoesNotHoldBackTheNextOne(t *testing.T) {
+	h := testharness.New(t, slowPaymentDecisions)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	paid := h.PayReservation(created.ID, 4000)
+	admin := h.Token(h.CreateUser("admin@example.com", "admin"))
+
+	// 25,00 € refunded from the dashboard, whose webhook is late: only 15,00 €
+	// are left to refund on Stripe.
+	h.Stripe.RefundFromDashboard(paid.StripePaymentIntentID, 2500)
+	if reason := confirmationRefusal(t, refundPayment(h, paid.ID, int64Ptr(2000), admin)); reason != "refund_exceeds_refundable" {
+		t.Fatalf("expected the refund of 20,00 € refused by Stripe to fail with refund_exceeds_refundable, got %q", reason)
+	}
+	reservationMetadata := map[string]string{"reservation_id": fmt.Sprint(created.ID)}
+	if response := h.SendStripeChargeRefunded(paid.GuideID, paid.StripePaymentIntentID, 2500, reservationMetadata); response.Code != http.StatusOK {
+		t.Fatalf("charge.refunded webhook: expected 200, got %d: %s", response.Code, response.Body)
+	}
+
+	if response := refundPayment(h, paid.ID, int64Ptr(1500), admin); response.Code != http.StatusOK {
+		t.Fatalf("refunding the 15,00 € left: expected 200, got %d: %s", response.Code, response.Body)
+	}
+
+	var got refundedReservation
+	h.Do(http.MethodGet, fmt.Sprintf("/reservations/%d", created.ID), nil, h.Login("alice@example.com")).JSON(t, &got)
+	if p := got.Payments[0]; p.Status != "refunded" || p.RefundAmount == nil || *p.RefundAmount != 4000 {
+		t.Errorf("expected the 40,00 € refunded, got %+v", p)
+	}
+}
+
+func TestARefundOfMoreThanIsLeftAfterThePendingOneIsRefused(t *testing.T) {
+	h := testharness.New(t, slowPaymentDecisions)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	paid := h.PayReservation(created.ID, 4000)
+	admin := h.Token(h.CreateUser("admin@example.com", "admin"))
+
+	h.Stripe.SetRefundDelay(2 * time.Second)
+	if response := refundPayment(h, paid.ID, nil, admin); response.Code == http.StatusOK {
+		t.Fatalf("expected the refund answered too late by Stripe to fail, got %d: %s", response.Code, response.Body)
+	}
+	h.Stripe.SetRefundDelay(0)
+
+	// The pending refund of the 40,00 € is settled first, leaving nothing.
+	if reason := confirmationRefusal(t, refundPayment(h, paid.ID, int64Ptr(1000), admin)); reason != "refund_exceeds_refundable" {
+		t.Fatalf("expected the refund of 10,00 € to fail with refund_exceeds_refundable, got %q", reason)
+	}
+	if refunds := h.Stripe.Refunds(); len(refunds) != 1 || refunds[0].Amount != 4000 {
+		t.Errorf("expected a single refund of 40,00 € on Stripe, got %+v", refunds)
+	}
+}
+
 // startedRambleWithOpenPayments returns the open payments of two reservations,
 // of alice then bob, on a ramble started since.
 func startedRambleWithOpenPayments(t *testing.T, h *testharness.Harness) (alice, bob reservation, aliceIntent, bobIntent string) {

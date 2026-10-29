@@ -83,6 +83,20 @@ func (config *Config) CancelUnconfirmedReservations(now time.Time) error {
 	return nil
 }
 
+// CancelPaymentsOfStartedRambles cancels the open payments of the reservations
+// of the rambles started at now: payment closes when the ramble starts.
+func (config *Config) CancelPaymentsOfStartedRambles(now time.Time) error {
+	reservations, err := config.ReservationRepository.FindWithOpenPaymentsRambleOnOrBefore(now)
+	if err != nil {
+		return err
+	}
+
+	for i := range reservations {
+		config.cancelObsoletePayments(&reservations[i])
+	}
+	return nil
+}
+
 func (config *Config) sendConfirmationRequest(reservation *dbmodel.Reservation, deadline time.Time) error {
 	firstName, lastName := reservation.BookerName()
 	data := email.EventConfirmationRequestData{

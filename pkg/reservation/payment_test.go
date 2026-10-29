@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"feldrise.com/balade/database/dbmodel"
+	reservations "feldrise.com/balade/pkg/reservation"
 	"feldrise.com/balade/pkg/testharness"
 )
 
@@ -429,5 +430,55 @@ func TestWebhookReceivedWhileThePaymentSucceedsNeverDowngradesIt(t *testing.T) {
 				t.Errorf("expected the payment to stay succeeded, got %q", got.Status)
 			}
 		})
+	}
+}
+
+func TestParticipantsCannotBeAddedOnceTheRambleHasStarted(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	token := h.Login("alice@example.com")
+	openConfirmation(h, ramble)
+	confirmReservation(h, created.ID, token)
+	h.Clock.Set(ramble.Date.Add(time.Minute))
+
+	response := addParticipants(h, created.ID, []participantPayload{{FirstName: "Zoé", LastName: "Martin", PriceLabel: "Enfant"}}, token)
+
+	if reason := confirmationRefusal(t, response); reason != "ramble_started" {
+		t.Errorf("expected reason ramble_started, got %q", reason)
+	}
+	if intents := h.Stripe.PaymentIntents(); len(intents) != 1 {
+		t.Errorf("expected no payment prepared once the ramble started, got %+v", intents)
+	}
+}
+
+func TestSchedulerCancelsTheOpenPaymentsOfStartedRambles(t *testing.T) {
+	h := testharness.New(t)
+	started := h.CreateRamble(payingFamilyRamble())
+	later := h.CreateRamble(payingFamilyRamble())
+	startedReservation := reserve(t, h, reservationPayload{RambleID: started.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	openConfirmation(h, started)
+	confirmReservation(h, startedReservation.ID, h.Login("alice@example.com"))
+	startedIntent := h.Stripe.PaymentIntents()[0].ID
+	h.DB.Model(&dbmodel.Ramble{}).Where("id = ?", later.ID).Update("date", started.Date.Add(48*time.Hour))
+	laterReservation := reserve(t, h, reservationPayload{RambleID: later.ID, ContactEmail: "bob@example.com", Participants: people(1, "Adulte")})
+	h.DB.Model(&dbmodel.Reservation{}).Where("id = ?", laterReservation.ID).Update("status", "confirmed")
+	var laterPayment reservationWithPayment
+	confirmReservation(h, laterReservation.ID, h.Login("bob@example.com")).JSON(t, &laterPayment)
+	if laterPayment.Payment == nil {
+		t.Fatalf("expected a payment for the later ramble, got %+v", laterPayment)
+	}
+
+	h.Clock.Set(started.Date.Add(time.Minute))
+	if err := reservations.New(h.Config).CancelPaymentsOfStartedRambles(h.Clock.Now()); err != nil {
+		t.Fatalf("cancelling the payments of started rambles: %v", err)
+	}
+
+	if cancelled := h.Stripe.CancelledPaymentIntents(); len(cancelled) != 1 || cancelled[0] != startedIntent {
+		t.Errorf("expected only the payment of the started ramble cancelled on Stripe, got %v", cancelled)
+	}
+	got := getReservation(t, h, startedReservation.ID, h.Login("alice@example.com"))
+	if len(got.Payments) != 1 || got.Payments[0].Status != "cancelled" {
+		t.Errorf("expected the open payment of the started ramble cancelled, got %+v", got.Payments)
 	}
 }

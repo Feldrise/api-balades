@@ -17,7 +17,7 @@ import (
 )
 
 // @Summary Add participants to a reservation
-// @Description Add participants to a pending or confirmed reservation if they all fit in the places left, or to a reservation in waiting list. Participants added to a confirmed reservation are confirmed, and payment holds the complementary payment of their prices when online payment is enabled. When the payment cannot be prepared, the participants stay added and payment_unavailable is true: the complement is paid later through the confirmation. The booker receives a summary email.
+// @Description Add participants, until the ramble starts, to a pending or confirmed reservation if they all fit in the places left, or to a reservation in waiting list. Participants added to a confirmed reservation are confirmed, and payment holds the complementary payment of their prices when online payment is enabled. When the payment cannot be prepared, the participants stay added and payment_unavailable is true: the complement is paid later through the confirmation. The booker receives a summary email.
 // @Tags reservations
 // @Accept json
 // @Produce json
@@ -28,7 +28,7 @@ import (
 // @Failure 401 {object} errors.ErrResponse
 // @Failure 403 {object} errors.ErrResponse
 // @Failure 404 {object} errors.ErrResponse
-// @Failure 409 {object} errors.ErrResponse "not_enough_places, reservation_cancelled or ramble_cancelled"
+// @Failure 409 {object} errors.ErrResponse "not_enough_places, reservation_cancelled, ramble_cancelled or ramble_started"
 // @Router /reservations/{id}/participants [post]
 func (config *Config) AddParticipants(w http.ResponseWriter, r *http.Request) {
 	reservation, ok := config.reservationToModify(w, r, permissionsChangeParticipants)
@@ -259,8 +259,8 @@ func (config *Config) requestReservation(w http.ResponseWriter, r *http.Request)
 }
 
 // respondWithPayment renders the reservation as saved with, when it is
-// confirmed and online payment is enabled, the payment of the amount it still
-// owes. When the payment cannot be prepared, the change stays saved and
+// confirmed, online payment is enabled and the ramble has not started, the
+// payment of the amount it still owes. When the payment cannot be prepared, the change stays saved and
 // payment_unavailable tells to pay later.
 func (config *Config) respondWithPayment(w http.ResponseWriter, r *http.Request, id uint) {
 	reservation, err := config.ReservationRepository.FindByID(id)
@@ -273,7 +273,7 @@ func (config *Config) respondWithPayment(w http.ResponseWriter, r *http.Request,
 
 	result := &model.ReservationWithPayment{}
 	if reservation.Status == dbmodel.ReservationStatusConfirmed && reservation.Ramble.PaymentEnabled && !reservation.Ramble.IsCancelled &&
-		!reservation.HasMissingPrices() && reservation.AmountDue() > 0 {
+		!reservation.Ramble.HasStarted(config.Clock.Now()) && !reservation.HasMissingPrices() && reservation.AmountDue() > 0 {
 		firstName, lastName := reservation.BookerName()
 		result.Payment, err = config.PaymentService.CreatePaymentForReservation(reservation, payments.PayerInfo{
 			Email: reservation.ContactEmail,

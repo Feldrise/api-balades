@@ -29,6 +29,9 @@ func (config *Config) addParticipants(reservation *dbmodel.Reservation, payload 
 		if locked.Ramble.IsCancelled {
 			return errRambleCancelled()
 		}
+		if locked.Ramble.HasStarted(config.Clock.Now()) {
+			return errRambleStarted()
+		}
 
 		hasBooker := false
 		for _, participant := range active.Participants {
@@ -184,7 +187,7 @@ func (config *Config) confirmReservation(reservation *dbmodel.Reservation) error
 		now := config.Clock.Now()
 		if active.Status == dbmodel.ReservationStatusConfirmed {
 			// Its balance is payable until the ramble starts.
-			if locked.Ramble.Date != nil && !now.Before(*locked.Ramble.Date) {
+			if locked.Ramble.HasStarted(now) {
 				return errRambleStarted()
 			}
 			return nil

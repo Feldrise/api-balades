@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"feldrise.com/balade/database/dbmodel"
+	"feldrise.com/balade/pkg/clock"
 	"feldrise.com/balade/pkg/model"
 	"feldrise.com/balade/pkg/payments/stripe"
 	"feldrise.com/balade/pkg/security"
@@ -44,6 +45,7 @@ type paymentService struct {
 	guideRepo         dbmodel.GuideRepository
 	stripeService     stripe.StripeService
 	encryptionService security.EncryptionService
+	clock             clock.Clock
 }
 
 func NewPaymentService(
@@ -52,6 +54,7 @@ func NewPaymentService(
 	guideRepo dbmodel.GuideRepository,
 	stripeService stripe.StripeService,
 	encryptionService security.EncryptionService,
+	clock clock.Clock,
 ) PaymentService {
 	return &paymentService{
 		paymentRepo:       paymentRepo,
@@ -59,6 +62,7 @@ func NewPaymentService(
 		guideRepo:         guideRepo,
 		stripeService:     stripeService,
 		encryptionService: encryptionService,
+		clock:             clock,
 	}
 }
 
@@ -77,6 +81,9 @@ func (s *paymentService) createPayment(payments dbmodel.PaymentRepository, reser
 	ramble := &reservation.Ramble
 	if !ramble.PaymentEnabled {
 		return nil, errors.New("payment is not enabled for this ramble")
+	}
+	if ramble.HasStarted(s.clock.Now()) {
+		return nil, errors.New("payment is closed once the ramble has started")
 	}
 
 	amountCents := reservation.AmountDue()
@@ -178,7 +185,7 @@ func (s *paymentService) CancelObsoletePayments(reservation *dbmodel.Reservation
 func (s *paymentService) cancelObsoletePayments(payments dbmodel.PaymentRepository, reservation *dbmodel.Reservation) error {
 	amountDue := reservation.AmountDue()
 	payable := !reservation.DeletedAt.Valid && reservation.Status == dbmodel.ReservationStatusConfirmed &&
-		!reservation.HasMissingPrices() && !reservation.Ramble.IsCancelled
+		!reservation.HasMissingPrices() && !reservation.Ramble.IsCancelled && !reservation.Ramble.HasStarted(s.clock.Now())
 
 	for i := range reservation.Payments {
 		open := &reservation.Payments[i]

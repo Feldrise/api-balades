@@ -177,6 +177,7 @@ func Build(constants Constants, databaseSession *gorm.DB, services Services) *Co
 		config.GuideRepository,
 		services.StripeService,
 		encryptionService,
+		services.Clock,
 	)
 
 	return &config

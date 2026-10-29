@@ -272,6 +272,9 @@ type ReservationRepository interface {
 	// FindRequestedPendingRambleOnOrBefore returns the pending reservations
 	// asked to confirm whose ramble takes place on or before date.
 	FindRequestedPendingRambleOnOrBefore(date time.Time) ([]Reservation, error)
+	// FindWithOpenPaymentsRambleOnOrBefore returns the reservations with an
+	// open payment whose ramble takes place on or before date.
+	FindWithOpenPaymentsRambleOnOrBefore(date time.Time) ([]Reservation, error)
 }
 
 // LockedRamble gives the changes allowed on the reservations of a ramble while it is locked.
@@ -578,6 +581,20 @@ func (r *reservationRepository) MarkConfirmationRequested(id uint, deadline time
 	return r.db.WithContext(ctx).Model(&Reservation{}).
 		Where("id = ? AND confirmation_deadline IS NULL", id).
 		Update("confirmation_deadline", deadline).Error
+}
+
+func (r *reservationRepository) FindWithOpenPaymentsRambleOnOrBefore(date time.Time) ([]Reservation, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var reservations []Reservation
+	err := r.db.WithContext(ctx).
+		Joins("JOIN rambles ON rambles.id = reservations.ramble_id").
+		Where("rambles.date <= ?", date).
+		Where("EXISTS (SELECT 1 FROM payments WHERE payments.reservation_id = reservations.id AND payments.deleted_at IS NULL AND payments.status IN ?)", OpenPaymentStatuses).
+		Order("reservations.created_at ASC").
+		Find(&reservations).Error
+	return reservations, err
 }
 
 func (r *reservationRepository) FindRequestedPendingRambleOnOrBefore(date time.Time) ([]Reservation, error) {

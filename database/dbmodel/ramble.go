@@ -74,6 +74,12 @@ func (rm *Ramble) IsPublished() bool {
 	return !rm.PublishedAt.After(time.Now())
 }
 
+// HasStarted reports whether the ramble has started at now. A ramble without
+// date has not started.
+func (rm *Ramble) HasStarted(now time.Time) bool {
+	return rm.Date != nil && !now.Before(*rm.Date)
+}
+
 // UnlimitedRambleMaxParticipantsPerReservation is the safeguard on the number of
 // participants of a reservation when the ramble has no capacity.
 const UnlimitedRambleMaxParticipantsPerReservation = 20

@@ -12,16 +12,14 @@ type modification struct {
 }
 
 // addParticipants adds participants to the reservation, all of them or none:
-// to a pending reservation only if they fit in the places left, to a
-// reservation in waiting list which keeps waiting as a whole.
+// to a pending or confirmed reservation only if they fit in the places left
+// (they are confirmed with a confirmed reservation), to a reservation in
+// waiting list which keeps waiting as a whole.
 func (config *Config) addParticipants(reservation *dbmodel.Reservation, payload *model.ParticipantsAddPayload) error {
 	return config.ReservationRepository.ModifyForRamble(reservation.RambleID, func(locked *dbmodel.LockedRamble) error {
 		active := locked.Reservation(reservation.ID)
 		if active == nil {
 			return errReservationCancelled()
-		}
-		if active.Status == dbmodel.ReservationStatusConfirmed {
-			return errReservationConfirmed()
 		}
 
 		hasBooker := false
@@ -119,16 +117,14 @@ func (config *Config) updateParticipant(reservation *dbmodel.Reservation, partic
 	})
 }
 
-// confirmReservation confirms a pending reservation. Confirming a reservation
-// already confirmed changes nothing.
+// confirmReservation confirms a pending reservation, once every participant's
+// price is known so that the amount to pay is complete. Confirming a
+// reservation already confirmed changes nothing.
 func (config *Config) confirmReservation(reservation *dbmodel.Reservation) error {
 	return config.ReservationRepository.ModifyForRamble(reservation.RambleID, func(locked *dbmodel.LockedRamble) error {
 		active := locked.Reservation(reservation.ID)
 		if active == nil {
 			return errReservationCancelled()
-		}
-		if active.Status == dbmodel.ReservationStatusConfirmed {
-			return nil
 		}
 		if active.Status == dbmodel.ReservationStatusWaitingList {
 			return errReservationWaitingList()
@@ -137,6 +133,9 @@ func (config *Config) confirmReservation(reservation *dbmodel.Reservation) error
 			if locked.Ramble.PriceMissing(participant.PriceLabel) {
 				return errMissingPrices()
 			}
+		}
+		if active.Status == dbmodel.ReservationStatusConfirmed {
+			return nil
 		}
 
 		now := config.Clock.Now()

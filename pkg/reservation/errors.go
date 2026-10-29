@@ -60,14 +60,6 @@ func errReservationCancelled() error {
 	return &businessError{status: http.StatusConflict, reason: "reservation_cancelled", message: "the reservation is cancelled"}
 }
 
-func errReservationConfirmed() error {
-	return &businessError{
-		status:  http.StatusConflict,
-		reason:  "reservation_confirmed",
-		message: "participants cannot be added to a confirmed reservation yet",
-	}
-}
-
 func errReservationPaid() error {
 	return &businessError{
 		status:  http.StatusConflict,

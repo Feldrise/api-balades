@@ -122,6 +122,18 @@ func (r *Reservation) HasSuccessfulPayment() bool {
 	return false
 }
 
+// AmountDue returns the amount in cents left to pay: the estimated amount
+// minus the succeeded payments, never below zero.
+func (r *Reservation) AmountDue() int64 {
+	due := r.EstimatedAmount()
+	for _, payment := range r.Payments {
+		if payment.Status == "succeeded" {
+			due -= payment.Amount
+		}
+	}
+	return max(due, 0)
+}
+
 // EstimatedAmount returns the amount in cents of the reservation, computed from
 // the known prices of its participants.
 func (r *Reservation) EstimatedAmount() int64 {
@@ -291,6 +303,7 @@ func preloadReservation(tx *gorm.DB) *gorm.DB {
 	return tx.
 		Preload("Ramble").
 		Preload("Ramble.Prices").
+		Preload("User.UserProfile").
 		Preload("Participants", func(db *gorm.DB) *gorm.DB { return db.Order("participants.id ASC") }).
 		Preload("Payments", func(db *gorm.DB) *gorm.DB { return db.Order("payments.created_at ASC") })
 }
@@ -399,7 +412,6 @@ func (r *reservationRepository) FindAwaitingConfirmationRequest(from time.Time, 
 
 	var reservations []Reservation
 	err := preloadReservation(r.db.WithContext(ctx)).
-		Preload("User.UserProfile").
 		Joins("JOIN rambles ON rambles.id = reservations.ramble_id AND rambles.deleted_at IS NULL").
 		Where("reservations.status = ? AND reservations.confirmation_deadline IS NULL", ReservationStatusPending).
 		Where("rambles.is_cancelled = ? AND rambles.date > ? AND rambles.date <= ?", false, from, until).

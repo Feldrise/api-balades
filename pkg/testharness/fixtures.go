@@ -8,6 +8,7 @@ import (
 	"feldrise.com/balade/database/dbmodel"
 	"feldrise.com/balade/pkg/authentication"
 	"feldrise.com/balade/pkg/notifications/email"
+	"feldrise.com/balade/pkg/security"
 )
 
 // CreateUser inserts a user with the given roles ("admin", "user", "guide").
@@ -60,6 +61,8 @@ type RambleOptions struct {
 	MaxParticipants *int
 	Prices          []Price
 	Unpublished     bool
+	// PaymentEnabled enables online payment, to a paying guide created with
+	// Stripe credentials (see PaymentGuidePublicKey).
 	PaymentEnabled  bool
 	PaymentRequired bool
 }
@@ -95,11 +98,45 @@ func (h *Harness) CreateRamble(options RambleOptions) *dbmodel.Ramble {
 		ramble.Prices = append(ramble.Prices, dbmodel.RamblePrice{Label: price.Label, Amount: price.Amount})
 	}
 
+	if options.PaymentEnabled {
+		guide := h.createPayingGuide()
+		ramble.PaymentGuideID = &guide.ID
+	}
+
 	if err := h.DB.Create(ramble).Error; err != nil {
 		h.t.Fatalf("creating ramble: %v", err)
 	}
 
 	return ramble
+}
+
+// PaymentGuidePublicKey is the Stripe public key of the paying guides of rambles with online payment.
+const PaymentGuidePublicKey = "pk_test_guide"
+
+func (h *Harness) createPayingGuide() *dbmodel.Guide {
+	h.t.Helper()
+
+	encryption := security.NewEncryptionService(jwtSecret)
+	secretKey, err := encryption.Encrypt("sk_test_guide")
+	if err != nil {
+		h.t.Fatalf("encrypting Stripe secret key: %v", err)
+	}
+	publicKey := PaymentGuidePublicKey
+
+	var count int64
+	h.DB.Model(&dbmodel.Guide{}).Count(&count)
+	guide := &dbmodel.Guide{
+		FirstName:       "Guide",
+		LastName:        "Payant",
+		Email:           fmt.Sprintf("paying-guide-%d@example.com", count+1),
+		StripePublicKey: &publicKey,
+		StripeSecretKey: &secretKey,
+		PaymentEnabled:  true,
+	}
+	if err := h.DB.Create(guide).Error; err != nil {
+		h.t.Fatalf("creating paying guide: %v", err)
+	}
+	return guide
 }
 
 // Int returns a pointer to value.

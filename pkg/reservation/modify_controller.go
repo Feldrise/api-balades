@@ -5,28 +5,30 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"feldrise.com/balade/database/dbmodel"
 	"feldrise.com/balade/pkg/authentication"
 	"feldrise.com/balade/pkg/errors"
 	"feldrise.com/balade/pkg/model"
+	"feldrise.com/balade/pkg/payments"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/render"
 )
 
 // @Summary Add participants to a reservation
-// @Description Add participants to a pending reservation if they all fit in the places left, or to a reservation in waiting list. The booker receives a summary email.
+// @Description Add participants to a pending or confirmed reservation if they all fit in the places left, or to a reservation in waiting list. Participants added to a confirmed reservation are confirmed, and payment holds the complementary payment of their prices when online payment is enabled. The booker receives a summary email.
 // @Tags reservations
 // @Accept json
 // @Produce json
 // @Param id path int true "Reservation ID"
 // @Param participants body model.ParticipantsAddPayload true "Participants to add"
-// @Success 200 {object} model.Reservation
+// @Success 200 {object} model.ReservationWithPayment
 // @Failure 400 {object} errors.ErrResponse
 // @Failure 401 {object} errors.ErrResponse
 // @Failure 403 {object} errors.ErrResponse
 // @Failure 404 {object} errors.ErrResponse
-// @Failure 409 {object} errors.ErrResponse "not_enough_places, reservation_cancelled or reservation_confirmed"
+// @Failure 409 {object} errors.ErrResponse "not_enough_places or reservation_cancelled"
 // @Router /reservations/{id}/participants [post]
 func (config *Config) AddParticipants(w http.ResponseWriter, r *http.Request) {
 	reservation, ok := config.reservationToModify(w, r)
@@ -45,7 +47,14 @@ func (config *Config) AddParticipants(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	config.respondModified(w, r, reservation.ID, changeParticipantsAdded, nil)
+	added, err := config.ReservationRepository.FindByID(reservation.ID)
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return
+	}
+	config.sendReservationEmail(added, changeParticipantsAdded)
+
+	config.respondWithPayment(w, r, reservation.ID)
 }
 
 // @Summary Remove a participant from a reservation
@@ -127,7 +136,7 @@ func (config *Config) UpdateParticipant(w http.ResponseWriter, r *http.Request) 
 // @Failure 401 {object} errors.ErrResponse
 // @Failure 403 {object} errors.ErrResponse
 // @Failure 404 {object} errors.ErrResponse
-// @Failure 409 {object} errors.ErrResponse "reservation_cancelled"
+// @Failure 409 {object} errors.ErrResponse "missing_prices, reservation_waiting_list or reservation_cancelled"
 // @Router /reservations/{id}/confirm [put]
 func (config *Config) Confirm(w http.ResponseWriter, r *http.Request) {
 	reservation, ok := config.bookerReservation(w, r)
@@ -140,13 +149,7 @@ func (config *Config) Confirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	confirmed, err := config.ReservationRepository.FindByID(reservation.ID)
-	if err != nil {
-		render.Render(w, r, errors.ErrServerError(err))
-		return
-	}
-
-	render.JSON(w, r, &model.ReservationWithPayment{Reservation: confirmed.ToModel()})
+	config.respondWithPayment(w, r, reservation.ID)
 }
 
 // @Summary Cancel a reservation
@@ -226,6 +229,37 @@ func (config *Config) bookerReservation(w http.ResponseWriter, r *http.Request) 
 	}
 
 	return reservation, true
+}
+
+// respondWithPayment renders the reservation as saved with, when it is
+// confirmed and online payment is enabled, the payment of the amount it still owes.
+func (config *Config) respondWithPayment(w http.ResponseWriter, r *http.Request, id uint) {
+	reservation, err := config.ReservationRepository.FindByID(id)
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return
+	}
+
+	var payment *model.PaymentResponse
+	if reservation.Status == dbmodel.ReservationStatusConfirmed && reservation.Ramble.PaymentEnabled &&
+		!reservation.HasMissingPrices() && reservation.AmountDue() > 0 {
+		firstName, lastName := bookerName(reservation)
+		payment, err = config.PaymentService.CreatePaymentForReservation(reservation, payments.PayerInfo{
+			Email: reservation.ContactEmail,
+			Name:  strings.TrimSpace(firstName + " " + lastName),
+		})
+		if err != nil {
+			render.Render(w, r, errors.ErrServerError(err))
+			return
+		}
+
+		if reservation, err = config.ReservationRepository.FindByID(id); err != nil {
+			render.Render(w, r, errors.ErrServerError(err))
+			return
+		}
+	}
+
+	render.JSON(w, r, &model.ReservationWithPayment{Reservation: reservation.ToModel(), Payment: payment})
 }
 
 // respondModified renders the reservation as saved, sends the booker the

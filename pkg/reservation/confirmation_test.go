@@ -191,3 +191,125 @@ func TestOnlyTheBookerCanConfirmAReservation(t *testing.T) {
 		t.Errorf("expected the reservation to stay pending, got %q", got.Status)
 	}
 }
+
+type paymentToMake struct {
+	Payment struct {
+		ID            uint   `json:"id"`
+		Amount        int64  `json:"amount"`
+		Status        string `json:"status"`
+		ReservationID *uint  `json:"reservation_id"`
+	} `json:"payment"`
+	ClientSecret   string `json:"client_secret"`
+	PublishableKey string `json:"publishable_key"`
+}
+
+type reservationWithPayment struct {
+	reservation
+	Payment *paymentToMake `json:"payment"`
+}
+
+func payingFamilyRamble() testharness.RambleOptions {
+	options := familyRamble()
+	options.PaymentEnabled = true
+	return options
+}
+
+func TestConfirmationCreatesThePaymentOfTheParticipantsPrices(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: append(people(2, "Adulte"), people(1, "Enfant")...)})
+	token := h.Login("alice@example.com")
+
+	response := confirmReservation(h, created.ID, token)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body)
+	}
+	var body reservationWithPayment
+	response.JSON(t, &body)
+	if body.Status != "confirmed" || body.Payment == nil {
+		t.Fatalf("expected a confirmed reservation with a payment to make, got %s", response.Body)
+	}
+	if p := body.Payment; p.Payment.Amount != 3100 || p.ClientSecret == "" || p.PublishableKey != testharness.PaymentGuidePublicKey ||
+		p.Payment.ReservationID == nil || *p.Payment.ReservationID != created.ID {
+		t.Errorf("expected a payment of 31,00 € for the reservation to the guide's account, got %+v", p)
+	}
+
+	intents := h.Stripe.PaymentIntents()
+	if len(intents) != 1 || intents[0].Amount != 3100 || intents[0].Credentials.SecretKey != "sk_test_guide" {
+		t.Fatalf("expected a single Stripe payment of 31,00 € on the guide's account, got %+v", intents)
+	}
+	if got := getReservation(t, h, created.ID, token); len(got.Payments) != 1 || got.Payments[0].Status != "pending" {
+		t.Errorf("expected the reservation to have a pending payment, got %+v", got.Payments)
+	}
+}
+
+func TestConfirmedReservationWithAMissingPriceCannotBePaid(t *testing.T) {
+	h := testharness.New(t)
+	l := legacy{t, h}
+	ramble := h.CreateRamble(payingFamilyRamble())
+	group := l.group(ramble, "parent@example.com", "confirmed")
+	l.registration(ramble, "Paul", "parent@example.com", "confirmed", &group.ID)
+	l.registration(ramble, "Léa", "lea@example.com", "confirmed", &group.ID)
+	h.MigrateAtStartup()
+	migrated := myReservations(t, h, "parent@example.com")[0]
+	token := h.Login("parent@example.com")
+
+	response := confirmReservation(h, migrated.ID, token)
+
+	if response.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", response.Code, response.Body)
+	}
+	var body errorBody
+	response.JSON(t, &body)
+	if body.Reason != "missing_prices" {
+		t.Errorf("expected reason missing_prices, got %s", response.Body)
+	}
+	if intents := h.Stripe.PaymentIntents(); len(intents) != 0 {
+		t.Errorf("expected no payment of an incomplete amount, got %+v", intents)
+	}
+}
+
+func TestConfirmingAnUnpaidConfirmedReservationGivesItsPaymentOnceOnly(t *testing.T) {
+	h := testharness.New(t)
+	options := payingFamilyRamble()
+	ramble := h.CreateRamble(options)
+	h.Clock.Set(ramble.Date.Add(-2 * 24 * time.Hour))
+	confirmed := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	if confirmed.Status != "confirmed" {
+		t.Fatalf("expected the reservation confirmed on creation within 3 days, got %q", confirmed.Status)
+	}
+	token := h.Login("alice@example.com")
+
+	var unpaid reservationWithPayment
+	confirmReservation(h, confirmed.ID, token).JSON(t, &unpaid)
+	if unpaid.Payment == nil || unpaid.Payment.Payment.Amount != 2500 {
+		t.Fatalf("expected the payment of 25,00 € of the unpaid reservation, got %+v", unpaid.Payment)
+	}
+
+	h.PayReservation(confirmed.ID, 2500)
+	var paid reservationWithPayment
+	confirmReservation(h, confirmed.ID, token).JSON(t, &paid)
+	if paid.Status != "confirmed" || paid.Payment != nil {
+		t.Errorf("expected nothing more to pay once paid, got %+v", paid.Payment)
+	}
+}
+
+func TestConfirmedButUnpaidReservationKeepsItsPlacesAtTheDeadline(t *testing.T) {
+	h := testharness.New(t)
+	options := payingFamilyRamble()
+	options.PaymentRequired = true
+	ramble := h.CreateRamble(options)
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	token := h.Login("alice@example.com")
+	if response := confirmReservation(h, created.ID, token); response.Code != http.StatusOK {
+		t.Fatalf("confirming: expected 200, got %d: %s", response.Code, response.Body)
+	}
+
+	h.Clock.Set(ramble.Date.Add(-time.Hour))
+	cancelUnconfirmedReservations(t, h)
+
+	if got := getReservation(t, h, created.ID, token); got.Status != "confirmed" {
+		t.Errorf("expected the confirmed reservation to keep its places without payment, got %q", got.Status)
+	}
+}

@@ -16,6 +16,9 @@ import (
 
 type PaymentService interface {
 	CreatePaymentForRegistration(registrationID uint, priceLabel string, payerInfo PayerInfo, returnURL string) (*model.PaymentResponse, error)
+	// CreatePaymentForReservation creates the payment of the amount due by the
+	// reservation, which needs its Ramble, Participants and Payments loaded.
+	CreatePaymentForReservation(reservation *dbmodel.Reservation, payerInfo PayerInfo) (*model.PaymentResponse, error)
 	CreatePaymentForGroup(groupID uint, priceLabel string, payerInfo PayerInfo, returnURL string, priceSelections []model.PriceSelection) (*model.PaymentResponse, error)
 	ProcessPaymentSuccess(paymentIntentID string) error
 	ProcessPaymentFailure(paymentIntentID string, failureReason ...string) error
@@ -151,6 +154,63 @@ func (s *paymentService) CreatePaymentForRegistration(registrationID uint, price
 	}
 
 	payment, err = s.paymentRepo.Create(payment)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create payment record: %w", err)
+	}
+
+	return &model.PaymentResponse{
+		Payment:        payment.ToModel(),
+		ClientSecret:   paymentIntent.ClientSecret,
+		PublishableKey: *guide.StripePublicKey,
+	}, nil
+}
+
+func (s *paymentService) CreatePaymentForReservation(reservation *dbmodel.Reservation, payerInfo PayerInfo) (*model.PaymentResponse, error) {
+	ramble := &reservation.Ramble
+	if !ramble.PaymentEnabled {
+		return nil, errors.New("payment is not enabled for this ramble")
+	}
+
+	amountCents := reservation.AmountDue()
+	if amountCents <= 0 {
+		return nil, errors.New("nothing to pay for this reservation")
+	}
+
+	guide, err := s.getPaymentGuide(ramble)
+	if err != nil {
+		return nil, err
+	}
+
+	credentials, err := s.getGuideCredentials(guide)
+	if err != nil {
+		return nil, err
+	}
+
+	reservationID := reservation.ID
+	metadata := map[string]string{
+		"reservation_id": strconv.FormatUint(uint64(reservationID), 10),
+		"ramble_id":      strconv.FormatUint(uint64(ramble.ID), 10),
+		"participants":   strconv.Itoa(len(reservation.Participants)),
+		"payer_email":    payerInfo.Email,
+		"payer_name":     payerInfo.Name,
+	}
+
+	paymentIntent, err := s.stripeService.CreatePaymentIntent(credentials, amountCents, "eur", metadata)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create payment intent: %w", err)
+	}
+
+	payment, err := s.paymentRepo.Create(&dbmodel.Payment{
+		StripePaymentIntentID: paymentIntent.ID,
+		Amount:                amountCents,
+		Currency:              "eur",
+		Status:                "pending",
+		PaymentMethod:         "card",
+		ReservationID:         &reservationID,
+		PayerEmail:            payerInfo.Email,
+		PayerName:             payerInfo.Name,
+		GuideID:               guide.ID,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create payment record: %w", err)
 	}

@@ -134,21 +134,34 @@ func TestAddingParticipantsCannotExceedTheMaximumPerReservation(t *testing.T) {
 	}
 }
 
-func TestAddingParticipantsToAConfirmedReservationIsNotSupportedYet(t *testing.T) {
+func TestParticipantsAddedToAPaidReservationAreConfirmedWithAComplementaryPayment(t *testing.T) {
 	h := testharness.New(t)
-	ramble := h.CreateRamble(testharness.RambleOptions{})
-	h.Clock.Advance(8 * 24 * time.Hour)
-	confirmed := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(1, "")})
-
-	response := addParticipants(h, confirmed.ID, people(1, ""), h.Login("alice@example.com"))
-
-	if response.Code != http.StatusConflict {
-		t.Fatalf("expected 409, got %d: %s", response.Code, response.Body)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	token := h.Login("alice@example.com")
+	if response := confirmReservation(h, created.ID, token); response.Code != http.StatusOK {
+		t.Fatalf("confirming: expected 200, got %d: %s", response.Code, response.Body)
 	}
-	var body errorBody
+	h.PayReservation(created.ID, 2500)
+
+	response := addParticipants(h, created.ID, []participantPayload{{FirstName: "Zoé", LastName: "Martin", PriceLabel: "Enfant"}}, token)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body)
+	}
+	var body reservationWithPayment
 	response.JSON(t, &body)
-	if body.Reason != "reservation_confirmed" {
-		t.Errorf("expected reason reservation_confirmed, got %s", response.Body)
+	if body.Status != "confirmed" || len(body.Participants) != 3 {
+		t.Errorf("expected the participant confirmed with the reservation, got %q with %d participants", body.Status, len(body.Participants))
+	}
+	if body.Payment == nil || body.Payment.Payment.Amount != 600 || body.Payment.ClientSecret == "" {
+		t.Fatalf("expected a complementary payment of 6,00 € for the added participant, got %s", response.Body)
+	}
+	if intents := h.Stripe.PaymentIntents(); len(intents) != 2 || intents[1].Amount != 600 {
+		t.Errorf("expected a second Stripe payment of 6,00 €, got %+v", intents)
+	}
+	if left := getRamble(t, h, ramble.ID).PlacesLeft; left == nil || *left != 7 {
+		t.Errorf("expected 7 places left, got %s", describe(left))
 	}
 }
 

@@ -3,6 +3,7 @@ package ramble
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -642,10 +643,28 @@ func (config *Config) Cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	config.cancelPendingPayments(dbRamble)
+
 	// Tell the bookers of the active reservations
 	go config.sendCancellationEmails(dbRamble)
 
 	render.JSON(w, r, dbRamble.ToModel())
+}
+
+// cancelPendingPayments cancels the payments of the ramble's reservations not
+// paid yet, so that they can no longer be paid. A failure is logged only.
+func (config *Config) cancelPendingPayments(ramble *dbmodel.Ramble) {
+	reservations, err := config.ReservationRepository.FindAll(&dbmodel.ReservationFilter{RambleID: &ramble.ID})
+	if err != nil {
+		log.Printf("Failed to get reservations to cancel their payments: %v", err)
+		return
+	}
+
+	for i := range reservations {
+		if err := config.PaymentService.CancelObsoletePayments(&reservations[i]); err != nil {
+			log.Printf("Failed to cancel the pending payments of reservation %d: %v", reservations[i].ID, err)
+		}
+	}
 }
 
 // sendCancellationEmails tells the booker of each reservation of the ramble that is not cancelled

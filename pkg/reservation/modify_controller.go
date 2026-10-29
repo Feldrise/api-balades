@@ -28,7 +28,7 @@ import (
 // @Failure 401 {object} errors.ErrResponse
 // @Failure 403 {object} errors.ErrResponse
 // @Failure 404 {object} errors.ErrResponse
-// @Failure 409 {object} errors.ErrResponse "not_enough_places or reservation_cancelled"
+// @Failure 409 {object} errors.ErrResponse "not_enough_places, reservation_cancelled or ramble_cancelled"
 // @Router /reservations/{id}/participants [post]
 func (config *Config) AddParticipants(w http.ResponseWriter, r *http.Request) {
 	reservation, ok := config.reservationToModify(w, r, permissionsChangeParticipants)
@@ -136,7 +136,7 @@ func (config *Config) UpdateParticipant(w http.ResponseWriter, r *http.Request) 
 // @Failure 401 {object} errors.ErrResponse
 // @Failure 403 {object} errors.ErrResponse
 // @Failure 404 {object} errors.ErrResponse
-// @Failure 409 {object} errors.ErrResponse "missing_prices, reservation_waiting_list, reservation_cancelled, confirmation_not_open, confirmation_deadline_passed or ramble_started"
+// @Failure 409 {object} errors.ErrResponse "missing_prices, reservation_waiting_list, reservation_cancelled, ramble_cancelled, confirmation_not_open, confirmation_deadline_passed or ramble_started"
 // @Router /reservations/{id}/confirm [put]
 func (config *Config) Confirm(w http.ResponseWriter, r *http.Request) {
 	reservation, ok := config.bookerReservation(w, r)
@@ -270,7 +270,7 @@ func (config *Config) respondWithPayment(w http.ResponseWriter, r *http.Request,
 	config.cancelObsoletePayments(reservation)
 
 	var payment *model.PaymentResponse
-	if reservation.Status == dbmodel.ReservationStatusConfirmed && reservation.Ramble.PaymentEnabled &&
+	if reservation.Status == dbmodel.ReservationStatusConfirmed && reservation.Ramble.PaymentEnabled && !reservation.Ramble.IsCancelled &&
 		!reservation.HasMissingPrices() && reservation.AmountDue() > 0 {
 		firstName, lastName := reservation.BookerName()
 		payment, err = config.PaymentService.CreatePaymentForReservation(reservation, payments.PayerInfo{

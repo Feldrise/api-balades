@@ -372,3 +372,50 @@ func TestConfirmedReservationBalanceIsPayableUntilTheRambleStarts(t *testing.T) 
 		t.Errorf("after the start: expected reason ramble_started, got %q", reason)
 	}
 }
+
+func cancelRamble(t *testing.T, h *testharness.Harness, rambleID uint) {
+	t.Helper()
+
+	admin := h.Token(h.CreateUser("ramble-admin@example.com", "admin"))
+	response := h.Do(http.MethodPut, fmt.Sprintf("/rambles/%d/cancel", rambleID), map[string]any{"reason": "Tempête"}, admin)
+	if response.Code != http.StatusOK {
+		t.Fatalf("cancelling the ramble: expected 200, got %d: %s", response.Code, response.Body)
+	}
+}
+
+func TestReservationOfACancelledRambleCannotBeConfirmedPaidOrGrown(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	pending := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	h.Clock.Set(ramble.Date.Add(-2 * 24 * time.Hour))
+	confirmed := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "bob@example.com", Participants: people(2, "Adulte")})
+	alice := h.Login("alice@example.com")
+	bob := h.Login("bob@example.com")
+	var payable reservationWithPayment
+	confirmReservation(h, confirmed.ID, bob).JSON(t, &payable)
+	if payable.Payment == nil {
+		t.Fatalf("expected a payment before the cancellation, got %+v", payable)
+	}
+
+	cancelRamble(t, h, ramble.ID)
+
+	if cancelled := h.Stripe.CancelledPaymentIntents(); len(cancelled) != 1 {
+		t.Errorf("expected the pending payment cancelled with the ramble, got %v", cancelled)
+	}
+
+	for _, c := range []struct {
+		name     string
+		response *testharness.Response
+	}{
+		{"confirming", confirmReservation(h, pending.ID, alice)},
+		{"paying", confirmReservation(h, confirmed.ID, bob)},
+		{"adding participants", addParticipants(h, pending.ID, people(1, "Adulte"), alice)},
+	} {
+		if reason := confirmationRefusal(t, c.response); reason != "ramble_cancelled" {
+			t.Errorf("%s: expected reason ramble_cancelled, got %q", c.name, reason)
+		}
+	}
+	if intents := h.Stripe.PaymentIntents(); len(intents) != 1 {
+		t.Errorf("expected no payment for a cancelled ramble, got %+v", intents)
+	}
+}

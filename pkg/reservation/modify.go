@@ -26,6 +26,9 @@ func (config *Config) addParticipants(reservation *dbmodel.Reservation, payload 
 		if active == nil {
 			return errReservationCancelled()
 		}
+		if locked.Ramble.IsCancelled {
+			return errRambleCancelled()
+		}
 
 		hasBooker := false
 		for _, participant := range active.Participants {
@@ -161,6 +164,9 @@ func (config *Config) confirmReservation(reservation *dbmodel.Reservation) error
 		active := locked.Reservation(reservation.ID)
 		if active == nil {
 			return errReservationCancelled()
+		}
+		if locked.Ramble.IsCancelled {
+			return errRambleCancelled()
 		}
 		if active.Status == dbmodel.ReservationStatusWaitingList {
 			return errReservationWaitingList()

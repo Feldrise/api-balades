@@ -137,7 +137,7 @@ func (s *paymentService) CreatePaymentForReservation(reservation *dbmodel.Reserv
 
 func (s *paymentService) CancelObsoletePayments(reservation *dbmodel.Reservation) error {
 	amountDue := reservation.AmountDue()
-	payable := reservation.Status == dbmodel.ReservationStatusConfirmed && !reservation.HasMissingPrices()
+	payable := reservation.Status == dbmodel.ReservationStatusConfirmed && !reservation.HasMissingPrices() && !reservation.Ramble.IsCancelled
 
 	for i := range reservation.Payments {
 		pending := &reservation.Payments[i]

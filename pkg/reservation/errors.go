@@ -100,6 +100,10 @@ func errConfirmationDeadlinePassed() error {
 	}
 }
 
+func errRambleCancelled() error {
+	return &businessError{status: http.StatusConflict, reason: "ramble_cancelled", message: "the ramble is cancelled"}
+}
+
 func errRambleStarted() error {
 	return &businessError{status: http.StatusConflict, reason: "ramble_started", message: "the ramble has started"}
 }

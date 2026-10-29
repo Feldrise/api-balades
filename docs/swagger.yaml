@@ -1812,13 +1812,13 @@ paths:
     post:
       consumes:
       - application/json
-      description: 'Add participants to a pending or confirmed reservation if they
-        all fit in the places left, or to a reservation in waiting list. Participants
-        added to a confirmed reservation are confirmed, and payment holds the complementary
-        payment of their prices when online payment is enabled. When the payment cannot
-        be prepared, the participants stay added and payment_unavailable is true:
-        the complement is paid later through the confirmation. The booker receives
-        a summary email.'
+      description: 'Add participants, until the ramble starts, to a pending or confirmed
+        reservation if they all fit in the places left, or to a reservation in waiting
+        list. Participants added to a confirmed reservation are confirmed, and payment
+        holds the complementary payment of their prices when online payment is enabled.
+        When the payment cannot be prepared, the participants stay added and payment_unavailable
+        is true: the complement is paid later through the confirmation. The booker
+        receives a summary email.'
       parameters:
       - description: Reservation ID
         in: path
@@ -1855,7 +1855,8 @@ paths:
           schema:
             $ref: '#/definitions/ErrResponse'
         "409":
-          description: not_enough_places, reservation_cancelled or ramble_cancelled
+          description: not_enough_places, reservation_cancelled, ramble_cancelled
+            or ramble_started
           schema:
             $ref: '#/definitions/ErrResponse'
       summary: Add participants to a reservation
@@ -2046,7 +2047,7 @@ paths:
   /reservations/admin/{id}:
     delete:
       description: Delete a reservation with its participants. The places it held
-        go to the waiting list.
+        go to the waiting list, and its open payments are cancelled.
       parameters:
       - description: Reservation ID
         in: path

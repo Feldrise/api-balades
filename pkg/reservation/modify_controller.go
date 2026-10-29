@@ -118,6 +118,37 @@ func (config *Config) UpdateParticipant(w http.ResponseWriter, r *http.Request) 
 	config.respondModified(w, r, reservation.ID, changeNone, nil)
 }
 
+// @Summary Confirm a reservation
+// @Description Confirm a pending reservation, for its booker only. When online payment is enabled, payment holds the payment of the amount due, computed from the participants' prices.
+// @Tags reservations
+// @Produce json
+// @Param id path int true "Reservation ID"
+// @Success 200 {object} model.ReservationWithPayment
+// @Failure 401 {object} errors.ErrResponse
+// @Failure 403 {object} errors.ErrResponse
+// @Failure 404 {object} errors.ErrResponse
+// @Failure 409 {object} errors.ErrResponse "reservation_cancelled"
+// @Router /reservations/{id}/confirm [put]
+func (config *Config) Confirm(w http.ResponseWriter, r *http.Request) {
+	reservation, ok := config.bookerReservation(w, r)
+	if !ok {
+		return
+	}
+
+	if err := config.confirmReservation(reservation); err != nil {
+		render.Render(w, r, renderError(err))
+		return
+	}
+
+	confirmed, err := config.ReservationRepository.FindByID(reservation.ID)
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return
+	}
+
+	render.JSON(w, r, &model.ReservationWithPayment{Reservation: confirmed.ToModel()})
+}
+
 // @Summary Cancel a reservation
 // @Description Cancel the whole reservation. The places released go to the waiting list. No automatic refund: has_successful_payment tells that the booker should contact the guide.
 // @Tags reservations
@@ -175,6 +206,22 @@ func (config *Config) reservationToModify(w http.ResponseWriter, r *http.Request
 	}
 	if !allowed {
 		render.Render(w, r, errors.ErrForbidden("insufficient permissions"))
+		return nil, false
+	}
+
+	return reservation, true
+}
+
+// bookerReservation returns the reservation of the request when the user is
+// its booker, and renders the error otherwise.
+func (config *Config) bookerReservation(w http.ResponseWriter, r *http.Request) (*dbmodel.Reservation, bool) {
+	reservation, ok := config.reservationToModify(w, r)
+	if !ok {
+		return nil, false
+	}
+
+	if reservation.UserID != authentication.ForContext(r.Context()).ID {
+		render.Render(w, r, errors.ErrForbidden("only the booker can do this"))
 		return nil, false
 	}
 

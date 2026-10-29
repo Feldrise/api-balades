@@ -76,6 +76,22 @@ func errReservationPaid() error {
 	}
 }
 
+func errReservationWaitingList() error {
+	return &businessError{
+		status:  http.StatusConflict,
+		reason:  "reservation_waiting_list",
+		message: "a reservation in waiting list cannot be confirmed",
+	}
+}
+
+func errMissingPrices() error {
+	return &businessError{
+		status:  http.StatusConflict,
+		reason:  "missing_prices",
+		message: "the price of every participant must be specified first",
+	}
+}
+
 func errParticipantNotFound() error {
 	return &businessError{status: http.StatusNotFound, reason: "participant_not_found", message: "no such participant in this reservation"}
 }

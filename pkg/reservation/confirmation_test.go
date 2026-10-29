@@ -2,6 +2,7 @@ package reservation_test
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -85,5 +86,108 @@ func TestSchedulerCancelsUnconfirmedReservationsAtTheDeadlineAndAdmitsTheWaiting
 	sent := h.Emails.SentWithTemplate("reservation_confirmation")
 	if last := sent[len(sent)-1]; last.To != "bob@example.com" || !strings.Contains(last.Subject, "Place disponible") {
 		t.Errorf("expected bob to be told a place is available, got %q to %q", last.Subject, last.To)
+	}
+}
+
+func confirmReservation(h *testharness.Harness, id uint, token string) *testharness.Response {
+	return h.Do(http.MethodPut, fmt.Sprintf("/reservations/%d/confirm", id), nil, token)
+}
+
+func TestBookerConfirmsAReservationWithoutOnlinePayment(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(familyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	token := h.Login("alice@example.com")
+
+	response := confirmReservation(h, created.ID, token)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body)
+	}
+	var body struct {
+		Status  string `json:"status"`
+		Payment any    `json:"payment"`
+	}
+	response.JSON(t, &body)
+	if body.Status != "confirmed" || body.Payment != nil {
+		t.Errorf("expected a confirmed reservation without payment to make, got %s", response.Body)
+	}
+	if got := getReservation(t, h, created.ID, token); got.Status != "confirmed" || got.ConfirmationDate == nil {
+		t.Errorf("expected the reservation to be confirmed with its date, got %+v", got)
+	}
+	if intents := h.Stripe.PaymentIntents(); len(intents) != 0 {
+		t.Errorf("expected no payment without online payment, got %+v", intents)
+	}
+}
+
+func TestReservationWithAMissingPriceCannotBeConfirmed(t *testing.T) {
+	h := testharness.New(t)
+	l := legacy{t, h}
+	ramble := h.CreateRamble(familyRamble())
+	group := l.group(ramble, "parent@example.com", "pending")
+	l.registration(ramble, "Paul", "parent@example.com", "pending", &group.ID)
+	l.registration(ramble, "Léa", "lea@example.com", "pending", &group.ID)
+	h.MigrateAtStartup()
+	migrated := myReservations(t, h, "parent@example.com")[0]
+	token := h.Login("parent@example.com")
+
+	response := confirmReservation(h, migrated.ID, token)
+
+	if response.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", response.Code, response.Body)
+	}
+	var body errorBody
+	response.JSON(t, &body)
+	if body.Reason != "missing_prices" {
+		t.Errorf("expected reason missing_prices, got %s", response.Body)
+	}
+	if got := getReservation(t, h, migrated.ID, token); got.Status != "pending" {
+		t.Errorf("expected the reservation to stay pending, got %q", got.Status)
+	}
+}
+
+func TestWaitingReservationCannotBeConfirmed(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(testharness.RambleOptions{MaxParticipants: testharness.Int(1)})
+	reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "first@example.com", Participants: people(1, "")})
+	waiting := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(1, "")})
+	token := h.Login("alice@example.com")
+
+	response := confirmReservation(h, waiting.ID, token)
+
+	if response.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", response.Code, response.Body)
+	}
+	var body errorBody
+	response.JSON(t, &body)
+	if body.Reason != "reservation_waiting_list" {
+		t.Errorf("expected reason reservation_waiting_list, got %s", response.Body)
+	}
+	if got := getReservation(t, h, waiting.ID, token); got.Status != "waiting_list" {
+		t.Errorf("expected the reservation to keep waiting, got %q", got.Status)
+	}
+}
+
+func TestOnlyTheBookerCanConfirmAReservation(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(testharness.RambleOptions{})
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(1, "")})
+	admin := h.CreateUser("admin@example.com", "admin")
+
+	for _, c := range []struct {
+		name  string
+		token string
+		code  int
+	}{
+		{"anonymous visitor", "", http.StatusUnauthorized},
+		{"another user", h.Login("mallory@example.com"), http.StatusForbidden},
+		{"admin", h.Token(admin), http.StatusForbidden},
+	} {
+		if response := confirmReservation(h, created.ID, c.token); response.Code != c.code {
+			t.Errorf("%s: expected %d, got %d: %s", c.name, c.code, response.Code, response.Body)
+		}
+	}
+	if got := getReservation(t, h, created.ID, h.Login("alice@example.com")); got.Status != "pending" {
+		t.Errorf("expected the reservation to stay pending, got %q", got.Status)
 	}
 }

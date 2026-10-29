@@ -36,6 +36,13 @@ type Reservation struct {
 	Ramble *RambleRegistrationSummary `json:"ramble,omitempty"`
 } // @name Reservation
 
+// ReservationWithPayment is a reservation with the payment the booker has to
+// make right away, null when there is nothing to pay online.
+type ReservationWithPayment struct {
+	*Reservation
+	Payment *PaymentResponse `json:"payment"`
+} // @name ReservationWithPayment
+
 type Participant struct {
 	ID         uint   `json:"id"`
 	FirstName  string `json:"first_name"`

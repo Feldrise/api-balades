@@ -119,6 +119,33 @@ func (config *Config) updateParticipant(reservation *dbmodel.Reservation, partic
 	})
 }
 
+// confirmReservation confirms a pending reservation. Confirming a reservation
+// already confirmed changes nothing.
+func (config *Config) confirmReservation(reservation *dbmodel.Reservation) error {
+	return config.ReservationRepository.ModifyForRamble(reservation.RambleID, func(locked *dbmodel.LockedRamble) error {
+		active := locked.Reservation(reservation.ID)
+		if active == nil {
+			return errReservationCancelled()
+		}
+		if active.Status == dbmodel.ReservationStatusConfirmed {
+			return nil
+		}
+		if active.Status == dbmodel.ReservationStatusWaitingList {
+			return errReservationWaitingList()
+		}
+		for _, participant := range active.Participants {
+			if locked.Ramble.PriceMissing(participant.PriceLabel) {
+				return errMissingPrices()
+			}
+		}
+
+		now := config.Clock.Now()
+		active.Status = dbmodel.ReservationStatusConfirmed
+		active.ConfirmationDate = &now
+		return locked.SaveStatus(active)
+	})
+}
+
 // cancelReservation cancels the whole reservation. The places released go to the waiting list.
 func (config *Config) cancelReservation(reservation *dbmodel.Reservation) (*modification, error) {
 	result := &modification{}

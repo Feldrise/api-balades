@@ -494,3 +494,34 @@ func TestWaitingListReservationEmailTellsTheReservationWaits(t *testing.T) {
 		t.Fatalf("expected an email to alice mentioning the waiting list, got %+v", sent)
 	}
 }
+
+func TestCancelledOrUnpublishedRambleCannotBeReserved(t *testing.T) {
+	h := testharness.New(t)
+	unpublished := h.CreateRamble(testharness.RambleOptions{Unpublished: true})
+	cancelled := h.CreateRamble(testharness.RambleOptions{})
+	if err := h.DB.Model(cancelled).Update("is_cancelled", true).Error; err != nil {
+		t.Fatalf("cancelling ramble: %v", err)
+	}
+
+	for name, c := range map[string]struct {
+		rambleID uint
+		code     int
+	}{
+		"unpublished": {unpublished.ID, http.StatusNotFound},
+		"cancelled":   {cancelled.ID, http.StatusBadRequest},
+		"unknown":     {999, http.StatusNotFound},
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := h.Do(http.MethodPost, "/reservations", reservationPayload{
+				RambleID: c.rambleID, ContactEmail: "alice@example.com", Participants: people(1, ""),
+			}, "")
+
+			if response.Code != c.code {
+				t.Fatalf("expected %d, got %d: %s", c.code, response.Code, response.Body)
+			}
+		})
+	}
+	if sent := h.Emails.Sent(); len(sent) != 0 {
+		t.Errorf("expected no email, got %d", len(sent))
+	}
+}

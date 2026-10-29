@@ -482,3 +482,27 @@ func TestSchedulerCancelsTheOpenPaymentsOfStartedRambles(t *testing.T) {
 		t.Errorf("expected the open payment of the started ramble cancelled, got %+v", got.Payments)
 	}
 }
+
+func TestPaymentToMakeNamesItsGuide(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	token := h.Login("alice@example.com")
+	openConfirmation(h, ramble)
+
+	for _, attempt := range []string{"created", "given back"} {
+		var body struct {
+			Payment struct {
+				Payment struct {
+					Guide struct {
+						ID uint `json:"id"`
+					} `json:"guide"`
+				} `json:"payment"`
+			} `json:"payment"`
+		}
+		confirmReservation(h, created.ID, token).JSON(t, &body)
+		if got := body.Payment.Payment.Guide.ID; got != *ramble.PaymentGuideID {
+			t.Errorf("payment %s: expected its guide %d, got %d", attempt, *ramble.PaymentGuideID, got)
+		}
+	}
+}

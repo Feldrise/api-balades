@@ -123,6 +123,7 @@ func (s *paymentService) createPayment(payments dbmodel.PaymentRepository, reser
 			return nil, errors.New("the payment is being collected, awaiting its confirmation by Stripe")
 		}
 
+		open.Guide = *guide
 		return &model.PaymentResponse{
 			Payment:        open.ToModel(),
 			ClientSecret:   paymentIntent.ClientSecret,
@@ -166,6 +167,7 @@ func (s *paymentService) createPayment(payments dbmodel.PaymentRepository, reser
 	if err != nil {
 		return nil, fmt.Errorf("failed to create payment record: %w", err)
 	}
+	payment.Guide = *guide
 
 	return &model.PaymentResponse{
 		Payment:        payment.ToModel(),

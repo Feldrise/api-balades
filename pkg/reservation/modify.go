@@ -234,9 +234,6 @@ func (config *Config) cancel(locked *dbmodel.LockedRamble, reservation *dbmodel.
 func (config *Config) AdmitWaitingList(rambleID uint) error {
 	var promoted []uint
 	err := config.ReservationRepository.ModifyForRamble(rambleID, func(locked *dbmodel.LockedRamble) error {
-		if locked.Ramble.IsCancelled {
-			return nil
-		}
 		var err error
 		promoted, err = config.promoteWaitingList(locked)
 		return err
@@ -252,8 +249,13 @@ func (config *Config) AdmitWaitingList(rambleID uint) error {
 // promoteWaitingList goes through the reservations in waiting list by creation
 // date and admits each one that fits entirely in the places left, never splitting
 // a reservation. It returns the admitted reservations. The reservations of the
-// skipped ids are left in the waiting list, as when an admin just moved them there.
+// skipped ids are left in the waiting list, as when an admin just moved them
+// there. Nobody is admitted on a cancelled ramble.
 func (config *Config) promoteWaitingList(locked *dbmodel.LockedRamble, skipped ...uint) ([]uint, error) {
+	if locked.Ramble.IsCancelled {
+		return nil, nil
+	}
+
 	var promoted []uint
 	for i := range locked.Active {
 		reservation := &locked.Active[i]

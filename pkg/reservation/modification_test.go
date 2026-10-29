@@ -554,3 +554,24 @@ func TestRaisingTheCapacityOfARambleAdmitsTheWaitingList(t *testing.T) {
 		t.Errorf("expected carol's reservation admitted once the ramble is unlimited, got %q", got.Status)
 	}
 }
+
+func TestWaitingListOfACancelledRambleIsNeverPromoted(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(testharness.RambleOptions{MaxParticipants: testharness.Int(2)})
+	leaving := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "")})
+	waiting := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "bob@example.com", Participants: people(2, "")})
+	h.DB.Model(&dbmodel.Ramble{}).Where("id = ?", ramble.ID).Update("is_cancelled", true)
+
+	if response := cancelReservation(h, leaving.ID, h.Login("alice@example.com")); response.Code != http.StatusOK {
+		t.Fatalf("cancelling: expected 200, got %d: %s", response.Code, response.Body)
+	}
+
+	if got := getReservation(t, h, waiting.ID, h.Login("bob@example.com")); got.Status != "waiting_list" {
+		t.Errorf("expected bob to stay in waiting list on the cancelled ramble, got %q", got.Status)
+	}
+	for _, sent := range h.Emails.Sent() {
+		if sent.To == "bob@example.com" && strings.HasPrefix(sent.Subject, "Place disponible") {
+			t.Errorf("expected bob not to be told a place is available, got %q", sent.Subject)
+		}
+	}
+}

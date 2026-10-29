@@ -94,6 +94,15 @@ type FakeStripeService struct {
 	paymentIntents []CreatedPaymentIntent
 	cancelled      []string
 	refunds        []Refund
+	unavailable    bool
+}
+
+// SetUnavailable makes the creation of payment intents fail, as when Stripe is unreachable.
+func (s *FakeStripeService) SetUnavailable(unavailable bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.unavailable = unavailable
 }
 
 func NewFakeStripeService() *FakeStripeService {
@@ -103,6 +112,10 @@ func NewFakeStripeService() *FakeStripeService {
 func (s *FakeStripeService) CreatePaymentIntent(credentials stripe.GuideStripeCredentials, amount int64, currency string, metadata map[string]string) (*stripego.PaymentIntent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if s.unavailable {
+		return nil, errors.New("stripe is unavailable")
+	}
 
 	id := fmt.Sprintf("pi_test_%d", len(s.paymentIntents)+1)
 	s.paymentIntents = append(s.paymentIntents, CreatedPaymentIntent{

@@ -255,3 +255,34 @@ func TestLateWebhooksNeverDowngradeASucceededOrRefundedPayment(t *testing.T) {
 		t.Errorf("expected the payment to stay refunded after late webhooks, got %q", got.Status)
 	}
 }
+
+func TestParticipantsAddedWhenThePaymentCannotBePreparedArePayableLater(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	h.Clock.Set(ramble.Date.Add(-2 * 24 * time.Hour))
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	h.PayReservation(created.ID, 2500)
+	token := h.Login("alice@example.com")
+	h.Stripe.SetUnavailable(true)
+
+	response := addParticipants(h, created.ID, []participantPayload{{FirstName: "Zoé", LastName: "Martin", PriceLabel: "Enfant"}}, token)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected the addition to succeed, got %d: %s", response.Code, response.Body)
+	}
+	var body struct {
+		reservationWithPayment
+		PaymentUnavailable bool `json:"payment_unavailable"`
+	}
+	response.JSON(t, &body)
+	if len(body.Participants) != 3 || body.Payment != nil || !body.PaymentUnavailable {
+		t.Errorf("expected the participant added, with the payment to make later, got %s", response.Body)
+	}
+
+	h.Stripe.SetUnavailable(false)
+	var later reservationWithPayment
+	confirmReservation(h, created.ID, token).JSON(t, &later)
+	if later.Payment == nil || later.Payment.Payment.Amount != 600 {
+		t.Errorf("expected the complement of 6,00 € payable later, got %+v", later.Payment)
+	}
+}

@@ -46,6 +46,9 @@ type Reservation struct {
 type ReservationWithPayment struct {
 	*Reservation
 	Payment *PaymentResponse `json:"payment"`
+	// PaymentUnavailable tells that the change is saved but the payment could not
+	// be prepared: it is to be made later, by confirming the reservation again.
+	PaymentUnavailable bool `json:"payment_unavailable"`
 } // @name ReservationWithPayment
 
 // ReservationRamble is the ramble a reservation is for.

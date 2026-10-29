@@ -17,7 +17,7 @@ import (
 )
 
 // @Summary Add participants to a reservation
-// @Description Add participants to a pending or confirmed reservation if they all fit in the places left, or to a reservation in waiting list. Participants added to a confirmed reservation are confirmed, and payment holds the complementary payment of their prices when online payment is enabled. The booker receives a summary email.
+// @Description Add participants to a pending or confirmed reservation if they all fit in the places left, or to a reservation in waiting list. Participants added to a confirmed reservation are confirmed, and payment holds the complementary payment of their prices when online payment is enabled. When the payment cannot be prepared, the participants stay added and payment_unavailable is true: the complement is paid later through the confirmation. The booker receives a summary email.
 // @Tags reservations
 // @Accept json
 // @Produce json
@@ -259,7 +259,9 @@ func (config *Config) requestReservation(w http.ResponseWriter, r *http.Request)
 }
 
 // respondWithPayment renders the reservation as saved with, when it is
-// confirmed and online payment is enabled, the payment of the amount it still owes.
+// confirmed and online payment is enabled, the payment of the amount it still
+// owes. When the payment cannot be prepared, the change stays saved and
+// payment_unavailable tells to pay later.
 func (config *Config) respondWithPayment(w http.ResponseWriter, r *http.Request, id uint) {
 	reservation, err := config.ReservationRepository.FindByID(id)
 	if err != nil {
@@ -269,17 +271,18 @@ func (config *Config) respondWithPayment(w http.ResponseWriter, r *http.Request,
 
 	config.cancelObsoletePayments(reservation)
 
-	var payment *model.PaymentResponse
+	result := &model.ReservationWithPayment{}
 	if reservation.Status == dbmodel.ReservationStatusConfirmed && reservation.Ramble.PaymentEnabled && !reservation.Ramble.IsCancelled &&
 		!reservation.HasMissingPrices() && reservation.AmountDue() > 0 {
 		firstName, lastName := reservation.BookerName()
-		payment, err = config.PaymentService.CreatePaymentForReservation(reservation, payments.PayerInfo{
+		result.Payment, err = config.PaymentService.CreatePaymentForReservation(reservation, payments.PayerInfo{
 			Email: reservation.ContactEmail,
 			Name:  strings.TrimSpace(firstName + " " + lastName),
 		})
 		if err != nil {
-			render.Render(w, r, errors.ErrServerError(err))
-			return
+			// The change is saved: the payment is made later, by confirming again.
+			log.Printf("Failed to prepare the payment of reservation %d: %v", id, err)
+			result.PaymentUnavailable = true
 		}
 
 		if reservation, err = config.ReservationRepository.FindByID(id); err != nil {
@@ -288,7 +291,8 @@ func (config *Config) respondWithPayment(w http.ResponseWriter, r *http.Request,
 		}
 	}
 
-	render.JSON(w, r, &model.ReservationWithPayment{Reservation: reservation.ToModel(), Payment: payment})
+	result.Reservation = reservation.ToModel()
+	render.JSON(w, r, result)
 }
 
 // respondModified renders the reservation as saved, sends the booker the

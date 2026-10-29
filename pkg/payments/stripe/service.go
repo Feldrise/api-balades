@@ -20,6 +20,10 @@ type GuideStripeCredentials struct {
 type StripeService interface {
 	CreatePaymentIntent(credentials GuideStripeCredentials, amount int64, currency string, metadata map[string]string) (*stripe.PaymentIntent, error)
 	ConfirmPayment(credentials GuideStripeCredentials, paymentIntentID string) (*stripe.PaymentIntent, error)
+	// RetrievePaymentIntent returns the payment intent with its client secret.
+	RetrievePaymentIntent(credentials GuideStripeCredentials, paymentIntentID string) (*stripe.PaymentIntent, error)
+	// CancelPaymentIntent cancels a payment intent not paid yet, so that it can no longer be paid.
+	CancelPaymentIntent(credentials GuideStripeCredentials, paymentIntentID string) error
 	RefundPayment(credentials GuideStripeCredentials, paymentIntentID string, amount *int64) (*stripe.Refund, error)
 	VerifyWebhookSignature(payload []byte, signature string, secret string) (*stripe.Event, error)
 	ProcessWebhookEvent(event *stripe.Event) (*WebhookEventData, error)
@@ -80,6 +84,39 @@ func (s *stripeService) ConfirmPayment(credentials GuideStripeCredentials, payme
 	}
 
 	return pi, nil
+}
+
+func (s *stripeService) RetrievePaymentIntent(credentials GuideStripeCredentials, paymentIntentID string) (*stripe.PaymentIntent, error) {
+	stripe.Key = credentials.SecretKey
+
+	params := &stripe.PaymentIntentParams{}
+
+	if credentials.AccountID != "" {
+		params.SetStripeAccount(credentials.AccountID)
+	}
+
+	pi, err := paymentintent.Get(paymentIntentID, params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve payment intent: %w", err)
+	}
+
+	return pi, nil
+}
+
+func (s *stripeService) CancelPaymentIntent(credentials GuideStripeCredentials, paymentIntentID string) error {
+	stripe.Key = credentials.SecretKey
+
+	params := &stripe.PaymentIntentCancelParams{}
+
+	if credentials.AccountID != "" {
+		params.SetStripeAccount(credentials.AccountID)
+	}
+
+	if _, err := paymentintent.Cancel(paymentIntentID, params); err != nil {
+		return fmt.Errorf("failed to cancel payment intent: %w", err)
+	}
+
+	return nil
 }
 
 func (s *stripeService) RefundPayment(credentials GuideStripeCredentials, paymentIntentID string, amount *int64) (*stripe.Refund, error) {

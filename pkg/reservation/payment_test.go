@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
+	"feldrise.com/balade/database/dbmodel"
 	"feldrise.com/balade/pkg/testharness"
 )
 
@@ -73,5 +75,77 @@ func TestOnlyStaffAllowedToRefundCanRefundAPayment(t *testing.T) {
 
 	if response := refundPayment(h, paid.ID, nil, h.Token(admin)); response.Code != http.StatusOK {
 		t.Errorf("admin: expected 200, got %d: %s", response.Code, response.Body)
+	}
+}
+
+// openConfirmation moves the clock to the start of the confirmation period of the ramble.
+func openConfirmation(h *testharness.Harness, ramble *dbmodel.Ramble) {
+	h.Clock.Set(ramble.Date.Add(-3*24*time.Hour + time.Hour))
+}
+
+func TestConfirmingAgainGivesBackThePendingPaymentOfTheSameAmount(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	token := h.Login("alice@example.com")
+	openConfirmation(h, ramble)
+
+	var first, second reservationWithPayment
+	confirmReservation(h, created.ID, token).JSON(t, &first)
+	confirmReservation(h, created.ID, token).JSON(t, &second)
+
+	if first.Payment == nil || second.Payment == nil {
+		t.Fatalf("expected a payment to make both times, got %+v and %+v", first.Payment, second.Payment)
+	}
+	if second.Payment.Payment.ID != first.Payment.Payment.ID || second.Payment.ClientSecret != first.Payment.ClientSecret {
+		t.Errorf("expected the same pending payment back, got %+v then %+v", first.Payment, second.Payment)
+	}
+	if intents := h.Stripe.PaymentIntents(); len(intents) != 1 {
+		t.Errorf("expected a single Stripe payment for the same amount due, got %+v", intents)
+	}
+}
+
+func TestPendingPaymentOfAnObsoleteAmountIsCancelledWhenTheAmountDueChanges(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	token := h.Login("alice@example.com")
+	openConfirmation(h, ramble)
+	var confirmed reservationWithPayment
+	confirmReservation(h, created.ID, token).JSON(t, &confirmed)
+
+	if response := removeParticipant(h, created.ID, created.Participants[1].ID, token); response.Code != http.StatusOK {
+		t.Fatalf("removing: expected 200, got %d: %s", response.Code, response.Body)
+	}
+
+	if cancelled := h.Stripe.CancelledPaymentIntents(); len(cancelled) != 1 || cancelled[0] != h.Stripe.PaymentIntents()[0].ID {
+		t.Fatalf("expected the payment of 25,00 € cancelled on Stripe, got %v", cancelled)
+	}
+	got := getReservation(t, h, created.ID, token)
+	if len(got.Payments) != 1 || got.Payments[0].Status != "cancelled" {
+		t.Errorf("expected the obsolete payment cancelled, got %+v", got.Payments)
+	}
+
+	var again reservationWithPayment
+	confirmReservation(h, created.ID, token).JSON(t, &again)
+	if again.Payment == nil || again.Payment.Payment.Amount != 1250 || again.Payment.Payment.ID == confirmed.Payment.Payment.ID {
+		t.Errorf("expected a new payment of 12,50 €, got %+v", again.Payment)
+	}
+}
+
+func TestPendingPaymentsAreCancelledWithTheReservation(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	token := h.Login("alice@example.com")
+	openConfirmation(h, ramble)
+	confirmReservation(h, created.ID, token)
+
+	if response := cancelReservation(h, created.ID, token); response.Code != http.StatusOK {
+		t.Fatalf("cancelling: expected 200, got %d: %s", response.Code, response.Body)
+	}
+
+	if cancelled := h.Stripe.CancelledPaymentIntents(); len(cancelled) != 1 {
+		t.Errorf("expected the pending payment cancelled on Stripe, got %v", cancelled)
 	}
 }

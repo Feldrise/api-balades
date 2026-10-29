@@ -240,6 +240,8 @@ func (config *Config) respondWithPayment(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	config.cancelObsoletePayments(reservation)
+
 	var payment *model.PaymentResponse
 	if reservation.Status == dbmodel.ReservationStatusConfirmed && reservation.Ramble.PaymentEnabled &&
 		!reservation.HasMissingPrices() && reservation.AmountDue() > 0 {
@@ -271,12 +273,21 @@ func (config *Config) respondModified(w http.ResponseWriter, r *http.Request, id
 		return
 	}
 
+	config.cancelObsoletePayments(reservation)
 	if change != changeNone {
 		config.sendReservationEmail(reservation, change)
 	}
 	config.notifyPromoted(promoted)
 
 	render.JSON(w, r, reservation.ToModel())
+}
+
+// cancelObsoletePayments cancels the pending payments of the reservation that
+// no longer match what it owes. A failure is logged without failing the request.
+func (config *Config) cancelObsoletePayments(reservation *dbmodel.Reservation) {
+	if err := config.PaymentService.CancelObsoletePayments(reservation); err != nil {
+		log.Printf("Failed to cancel obsolete payments of reservation %d: %v", reservation.ID, err)
+	}
 }
 
 func parseID(w http.ResponseWriter, r *http.Request, param string) (uint, bool) {

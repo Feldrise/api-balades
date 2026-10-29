@@ -71,6 +71,9 @@ func (config *Config) CancelUnconfirmedReservations(now time.Time) error {
 		}
 
 		log.Printf("Cancelled unconfirmed reservation %d", reservation.ID)
+		if cancelled, err := config.ReservationRepository.FindByID(reservation.ID); err == nil && cancelled != nil {
+			config.cancelObsoletePayments(cancelled)
+		}
 		config.notifyPromoted(promoted)
 	}
 	return nil

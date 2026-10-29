@@ -46,6 +46,11 @@ type Payment struct {
 	Guide Guide `gorm:"foreignKey:GuideID"`
 }
 
+// IsPending reports whether the payment is still to be paid by the payer.
+func (p *Payment) IsPending() bool {
+	return p.Status == "pending" || p.Status == "requires_action"
+}
+
 func (p Payment) ToModel() model.Payment {
 	payment := model.Payment{
 		ID:                    p.ID,
@@ -97,6 +102,8 @@ type PaymentRepository interface {
 	CountAll(filter *PaymentFilter) (int64, error)
 	Create(payment *Payment) (*Payment, error)
 	Update(payment *Payment) (*Payment, error)
+	// UpdateStatus saves the status of the payment only.
+	UpdateStatus(id uint, status string) error
 	Delete(id uint) error
 	GetTotalAmountByGuide(guideID uint, status string) (int64, error)
 }
@@ -282,6 +289,13 @@ func (r *paymentRepository) Update(payment *Payment) (*Payment, error) {
 
 	err := r.db.WithContext(ctx).Save(payment).Error
 	return payment, err
+}
+
+func (r *paymentRepository) UpdateStatus(id uint, status string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	return r.db.WithContext(ctx).Model(&Payment{}).Where("id = ?", id).Update("status", status).Error
 }
 
 func (r *paymentRepository) Delete(id uint) error {

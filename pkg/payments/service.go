@@ -17,7 +17,13 @@ import (
 type PaymentService interface {
 	// CreatePaymentForReservation creates the payment of the amount due by the
 	// reservation, which needs its Ramble, Participants and Payments loaded.
+	// It gives back the pending payment of the same amount, if any, rather than
+	// creating another one, and cancels the pending payments of other amounts.
 	CreatePaymentForReservation(reservation *dbmodel.Reservation, payerInfo PayerInfo) (*model.PaymentResponse, error)
+	// CancelObsoletePayments cancels, on Stripe too, the pending payments of the
+	// reservation that no longer match what it owes, so that they cannot be paid.
+	// The reservation needs its Ramble, Participants and Payments loaded.
+	CancelObsoletePayments(reservation *dbmodel.Reservation) error
 	ProcessPaymentSuccess(paymentIntentID string) error
 	ProcessPaymentFailure(paymentIntentID string, failureReason ...string) error
 	RefundPayment(paymentID uint, amount *int64, reason *string) error
@@ -75,6 +81,24 @@ func (s *paymentService) CreatePaymentForReservation(reservation *dbmodel.Reserv
 		return nil, err
 	}
 
+	for _, pending := range reservation.Payments {
+		if pending.IsPending() && pending.Amount == amountCents && pending.GuideID == guide.ID {
+			paymentIntent, err := s.stripeService.RetrievePaymentIntent(credentials, pending.StripePaymentIntentID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to retrieve payment intent: %w", err)
+			}
+			return &model.PaymentResponse{
+				Payment:        pending.ToModel(),
+				ClientSecret:   paymentIntent.ClientSecret,
+				PublishableKey: *guide.StripePublicKey,
+			}, nil
+		}
+	}
+
+	if err := s.CancelObsoletePayments(reservation); err != nil {
+		return nil, err
+	}
+
 	reservationID := reservation.ID
 	metadata := map[string]string{
 		"reservation_id": strconv.FormatUint(uint64(reservationID), 10),
@@ -109,6 +133,39 @@ func (s *paymentService) CreatePaymentForReservation(reservation *dbmodel.Reserv
 		ClientSecret:   paymentIntent.ClientSecret,
 		PublishableKey: *guide.StripePublicKey,
 	}, nil
+}
+
+func (s *paymentService) CancelObsoletePayments(reservation *dbmodel.Reservation) error {
+	amountDue := reservation.AmountDue()
+	payable := reservation.Status == dbmodel.ReservationStatusConfirmed && !reservation.HasMissingPrices()
+
+	for i := range reservation.Payments {
+		pending := &reservation.Payments[i]
+		if !pending.IsPending() || (payable && pending.Amount == amountDue) {
+			continue
+		}
+
+		guide, err := s.guideRepo.FindByID(pending.GuideID)
+		if err != nil {
+			return fmt.Errorf("failed to find payment guide: %w", err)
+		}
+		if guide == nil {
+			return errors.New("payment guide not found")
+		}
+		credentials, err := s.getGuideCredentials(guide)
+		if err != nil {
+			return err
+		}
+		if err := s.stripeService.CancelPaymentIntent(credentials, pending.StripePaymentIntentID); err != nil {
+			return fmt.Errorf("failed to cancel obsolete payment %d: %w", pending.ID, err)
+		}
+
+		pending.Status = "cancelled"
+		if err := s.paymentRepo.UpdateStatus(pending.ID, pending.Status); err != nil {
+			return fmt.Errorf("failed to update payment: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *paymentService) ProcessPaymentSuccess(paymentIntentID string) error {

@@ -261,6 +261,7 @@ func (config *Config) AdminUpdateStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	config.cancelObsoletePayments(updated)
 	if result.changed && data.SendEmail != nil && *data.SendEmail {
 		config.sendReservationEmail(updated, changeStatusUpdated)
 	}
@@ -433,6 +434,7 @@ func (config *Config) bulkAction(user *dbmodel.User, id uint, data *model.BulkRe
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload reservation: %w", err)
 	}
+	config.cancelObsoletePayments(updated)
 	if change.changed && sendEmail {
 		config.sendReservationEmail(updated, changeStatusUpdated)
 	}
@@ -493,6 +495,7 @@ func (config *Config) AdminUpdateParticipant(w http.ResponseWriter, r *http.Requ
 		render.Render(w, r, errors.ErrServerError(err))
 		return
 	}
+	config.cancelObsoletePayments(updated)
 
 	render.JSON(w, r, updated.ToModel())
 }

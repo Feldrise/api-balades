@@ -91,6 +91,7 @@ type Refund struct {
 type FakeStripeService struct {
 	mu             sync.Mutex
 	paymentIntents []CreatedPaymentIntent
+	cancelled      []string
 	refunds        []Refund
 }
 
@@ -125,6 +126,32 @@ func (s *FakeStripeService) ConfirmPayment(credentials stripe.GuideStripeCredent
 	return &stripego.PaymentIntent{ID: paymentIntentID, Status: stripego.PaymentIntentStatusSucceeded}, nil
 }
 
+func (s *FakeStripeService) RetrievePaymentIntent(credentials stripe.GuideStripeCredentials, paymentIntentID string) (*stripego.PaymentIntent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, intent := range s.paymentIntents {
+		if intent.ID == paymentIntentID {
+			return &stripego.PaymentIntent{
+				ID:           intent.ID,
+				Amount:       intent.Amount,
+				Currency:     stripego.Currency(intent.Currency),
+				ClientSecret: intent.ID + "_secret",
+				Metadata:     intent.Metadata,
+			}, nil
+		}
+	}
+	return nil, fmt.Errorf("no such payment intent %q", paymentIntentID)
+}
+
+func (s *FakeStripeService) CancelPaymentIntent(credentials stripe.GuideStripeCredentials, paymentIntentID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.cancelled = append(s.cancelled, paymentIntentID)
+	return nil
+}
+
 func (s *FakeStripeService) RefundPayment(credentials stripe.GuideStripeCredentials, paymentIntentID string, amount *int64) (*stripego.Refund, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -148,6 +175,14 @@ func (s *FakeStripeService) PaymentIntents() []CreatedPaymentIntent {
 	defer s.mu.Unlock()
 
 	return append([]CreatedPaymentIntent(nil), s.paymentIntents...)
+}
+
+// CancelledPaymentIntents returns the ids of the payment intents cancelled so far.
+func (s *FakeStripeService) CancelledPaymentIntents() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]string(nil), s.cancelled...)
 }
 
 // Refunds returns the refunds made so far.

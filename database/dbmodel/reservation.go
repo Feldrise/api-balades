@@ -112,6 +112,16 @@ func (r *Reservation) HasMissingPrices() bool {
 	return false
 }
 
+// HasSuccessfulPayment reports whether a payment of the reservation succeeded.
+func (r *Reservation) HasSuccessfulPayment() bool {
+	for _, payment := range r.Payments {
+		if payment.Status == "succeeded" {
+			return true
+		}
+	}
+	return false
+}
+
 // EstimatedAmount returns the amount in cents of the reservation, computed from
 // the known prices of its participants.
 func (r *Reservation) EstimatedAmount() int64 {
@@ -171,6 +181,7 @@ func (r *Reservation) ToModel() *model.Reservation {
 		EstimatedAmount:      r.EstimatedAmount(),
 		HasMissingPrices:     r.HasMissingPrices(),
 		Payments:             payments,
+		HasSuccessfulPayment: r.HasSuccessfulPayment(),
 	}
 
 	if r.Ramble.ID != 0 {
@@ -195,6 +206,68 @@ type ReservationRepository interface {
 	// not cancelled to build, and creates the reservation build returns. The lock
 	// makes the capacity and uniqueness decisions of build safe from concurrent creations.
 	CreateForRamble(rambleID uint, build func(active []Reservation) (*Reservation, error)) (*Reservation, error)
+	// ModifyForRamble locks the ramble and runs modify in a transaction with the
+	// ramble (and its prices) and its reservations that are not cancelled. The
+	// lock makes the capacity decisions of modify safe from concurrent changes.
+	ModifyForRamble(rambleID uint, modify func(locked *LockedRamble) error) error
+}
+
+// LockedRamble gives the changes allowed on the reservations of a ramble while it is locked.
+type LockedRamble struct {
+	tx *gorm.DB
+
+	Ramble *Ramble
+	// Active are the ramble's reservations that are not cancelled, by creation date.
+	Active []Reservation
+}
+
+// Reservation returns the active reservation with the given id, nil when there is none.
+func (l *LockedRamble) Reservation(id uint) *Reservation {
+	for i := range l.Active {
+		if l.Active[i].ID == id {
+			return &l.Active[i]
+		}
+	}
+	return nil
+}
+
+// AddParticipants saves participants as new participants of reservation.
+func (l *LockedRamble) AddParticipants(reservation *Reservation, participants []Participant) error {
+	for i := range participants {
+		participants[i].ReservationID = reservation.ID
+	}
+	if err := l.tx.Create(&participants).Error; err != nil {
+		return err
+	}
+	reservation.Participants = append(reservation.Participants, participants...)
+	return nil
+}
+
+// UpdateParticipant saves the name and price of participant.
+func (l *LockedRamble) UpdateParticipant(participant *Participant) error {
+	return l.tx.Model(participant).Select("FirstName", "LastName", "PriceLabel").Updates(participant).Error
+}
+
+// RemoveParticipant removes the participant from reservation.
+func (l *LockedRamble) RemoveParticipant(reservation *Reservation, participantID uint) error {
+	if err := l.tx.Where("reservation_id = ?", reservation.ID).Delete(&Participant{}, participantID).Error; err != nil {
+		return err
+	}
+	kept := reservation.Participants[:0]
+	for _, participant := range reservation.Participants {
+		if participant.ID != participantID {
+			kept = append(kept, participant)
+		}
+	}
+	reservation.Participants = kept
+	return nil
+}
+
+// SaveStatus saves the status of reservation with its confirmation and cancellation details.
+func (l *LockedRamble) SaveStatus(reservation *Reservation) error {
+	return l.tx.Model(reservation).
+		Select("Status", "ConfirmationDate", "CancellationDate", "CancellationReason").
+		Updates(reservation).Error
 }
 
 type reservationRepository struct {
@@ -282,4 +355,31 @@ func (r *reservationRepository) CreateForRamble(rambleID uint, build func(active
 	}
 
 	return r.FindByID(created.ID)
+}
+
+func (r *reservationRepository) ModifyForRamble(rambleID uint, modify func(locked *LockedRamble) error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var ramble Ramble
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&ramble, rambleID).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("ramble_id = ?", rambleID).Find(&ramble.Prices).Error; err != nil {
+			return err
+		}
+
+		var active []Reservation
+		err := tx.Preload("Participants", func(db *gorm.DB) *gorm.DB { return db.Order("participants.id ASC") }).
+			Preload("Payments").
+			Where("ramble_id = ? AND status <> ?", rambleID, ReservationStatusCancelled).
+			Order("created_at ASC").
+			Find(&active).Error
+		if err != nil {
+			return err
+		}
+
+		return modify(&LockedRamble{tx: tx, Ramble: &ramble, Active: active})
+	})
 }

@@ -29,6 +29,9 @@ type Reservation struct {
 	// EstimatedAmount is incomplete.
 	HasMissingPrices bool                 `json:"has_missing_prices"`
 	Payments         []ReservationPayment `json:"payments"`
+	// HasSuccessfulPayment tells that a payment succeeded: after a removal or a
+	// cancellation, the booker is invited to contact the guide for a refund.
+	HasSuccessfulPayment bool `json:"has_successful_payment"`
 
 	Ramble *RambleRegistrationSummary `json:"ramble,omitempty"`
 } // @name Reservation
@@ -90,11 +93,8 @@ func (payload *ReservationCreatePayload) Bind(r *http.Request) error {
 	bookers := 0
 	for i := range payload.Participants {
 		participant := &payload.Participants[i]
-		participant.FirstName = strings.TrimSpace(participant.FirstName)
-		participant.LastName = strings.TrimSpace(participant.LastName)
-
-		if participant.FirstName == "" || participant.LastName == "" {
-			return errors.New("each participant needs a first name and a last name")
+		if err := participant.normalize(); err != nil {
+			return err
 		}
 		if participant.IsBooker {
 			bookers++
@@ -103,6 +103,52 @@ func (payload *ReservationCreatePayload) Bind(r *http.Request) error {
 
 	if bookers > 1 {
 		return errors.New("only one participant can be the booker")
+	}
+
+	return nil
+}
+
+type ParticipantsAddPayload struct {
+	Participants []ParticipantPayload `json:"participants"`
+} // @name ParticipantsAddPayload
+
+func (payload *ParticipantsAddPayload) Bind(r *http.Request) error {
+	if len(payload.Participants) == 0 {
+		return errors.New("at least one participant is required")
+	}
+
+	for i := range payload.Participants {
+		if err := payload.Participants[i].normalize(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+type ParticipantUpdatePayload struct {
+	FirstName  string `json:"first_name"`
+	LastName   string `json:"last_name"`
+	PriceLabel string `json:"price_label"`
+} // @name ParticipantUpdatePayload
+
+func (payload *ParticipantUpdatePayload) Bind(r *http.Request) error {
+	payload.FirstName = strings.TrimSpace(payload.FirstName)
+	payload.LastName = strings.TrimSpace(payload.LastName)
+
+	if payload.FirstName == "" || payload.LastName == "" {
+		return errors.New("a participant needs a first name and a last name")
+	}
+
+	return nil
+}
+
+func (participant *ParticipantPayload) normalize() error {
+	participant.FirstName = strings.TrimSpace(participant.FirstName)
+	participant.LastName = strings.TrimSpace(participant.LastName)
+
+	if participant.FirstName == "" || participant.LastName == "" {
+		return errors.New("each participant needs a first name and a last name")
 	}
 
 	return nil

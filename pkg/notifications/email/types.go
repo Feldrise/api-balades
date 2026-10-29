@@ -29,8 +29,11 @@ type ReservationConfirmationData struct {
 	Title    string
 	Date     string
 	Location string
-	// Status is pending, confirmed or waiting_list.
-	Status       string
+	// Status is pending, confirmed, waiting_list or cancelled.
+	Status string
+	// Change is empty for a new reservation, or participants_added,
+	// participants_removed or promoted (left the waiting list).
+	Change       string
 	Participants []ReservationParticipantInfo
 	// HasPrices tells whether the ramble has prices, so an estimated amount.
 	HasPrices bool

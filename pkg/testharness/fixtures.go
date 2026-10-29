@@ -1,6 +1,7 @@
 package testharness
 
 import (
+	"fmt"
 	"time"
 
 	"feldrise.com/balade/database"
@@ -172,4 +173,37 @@ func (h *Harness) MigrateAtStartup() {
 	h.t.Helper()
 
 	database.Migrate(h.DB)
+}
+
+// PayReservation records a succeeded payment of amount cents for the reservation,
+// as if the booker had paid it.
+func (h *Harness) PayReservation(reservationID uint, amount int64) *dbmodel.Payment {
+	h.t.Helper()
+
+	var reservation dbmodel.Reservation
+	if err := h.DB.First(&reservation, reservationID).Error; err != nil {
+		h.t.Fatalf("finding reservation %d: %v", reservationID, err)
+	}
+
+	guide := &dbmodel.Guide{FirstName: "Guide", LastName: "Payé", Email: fmt.Sprintf("guide-%d@example.com", reservationID)}
+	if err := h.DB.Create(guide).Error; err != nil {
+		h.t.Fatalf("creating guide: %v", err)
+	}
+
+	paidAt := h.Clock.Now()
+	payment := &dbmodel.Payment{
+		StripePaymentIntentID: fmt.Sprintf("pi_paid_%d", reservationID),
+		Amount:                amount,
+		Status:                "succeeded",
+		ReservationID:         &reservationID,
+		PayerEmail:            reservation.ContactEmail,
+		PayerName:             "Payer",
+		GuideID:               guide.ID,
+		PaidAt:                &paidAt,
+	}
+	if err := h.DB.Create(payment).Error; err != nil {
+		h.t.Fatalf("creating payment: %v", err)
+	}
+
+	return payment
 }

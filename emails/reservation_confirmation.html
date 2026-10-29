@@ -106,7 +106,15 @@
                     <tr>
                         <td bgcolor="#ffffff" align="center" valign="top"
                             style="padding: 40px 20px 20px 20px; border-radius: 4px 4px 0px 0px; color: #111111; font-family: 'Lato', Helvetica, Arial, sans-serif; font-size: 36px; font-weight: 700; line-height: 40px;">
-                            {{if eq .Status "waiting_list"}}
+                            {{if eq .Status "cancelled"}}
+                            <h1 style="font-size: 36px; font-weight: 700; margin: 0;">Réservation annulée</h1>
+                            {{else if eq .Change "participants_added"}}
+                            <h1 style="font-size: 36px; font-weight: 700; margin: 0;">Participants ajoutés</h1>
+                            {{else if eq .Change "participants_removed"}}
+                            <h1 style="font-size: 36px; font-weight: 700; margin: 0;">Participants retirés</h1>
+                            {{else if eq .Change "promoted"}}
+                            <h1 style="font-size: 36px; font-weight: 700; margin: 0;">Une place s'est libérée !</h1>
+                            {{else if eq .Status "waiting_list"}}
                             <h1 style="font-size: 36px; font-weight: 700; margin: 0;">Réservation en liste d'attente</h1>
                             {{else}}
                             <h1 style="font-size: 36px; font-weight: 700; margin: 0;">Réservation enregistrée !</h1>
@@ -126,8 +134,25 @@
                             style="padding: 20px 30px 20px 30px; color: #666666; font-family: 'Lato', Helvetica, Arial, sans-serif; font-size: 18px; font-weight: 400; line-height: 25px;">
                             <p style="margin: 0;">Bonjour,</p>
                             <br>
+                            {{if eq .Status "cancelled"}}
+                            <p style="margin: 0;">Le dernier participant a été retiré : votre réservation pour la
+                                balade écologique suivante est annulée.</p>
+                            {{else if eq .Change "participants_added"}}
+                            <p style="margin: 0;">Des participants ont été ajoutés à votre réservation. Elle compte
+                                désormais {{len .Participants}} participant{{if gt (len .Participants) 1}}s{{end}} pour
+                                la balade écologique suivante :</p>
+                            {{else if eq .Change "participants_removed"}}
+                            <p style="margin: 0;">Des participants ont été retirés de votre réservation. Elle compte
+                                désormais {{len .Participants}} participant{{if gt (len .Participants) 1}}s{{end}} pour
+                                la balade écologique suivante :</p>
+                            {{else if eq .Change "promoted"}}
+                            <p style="margin: 0;">Des places se sont libérées : toute votre réservation pour
+                                {{len .Participants}} participant{{if gt (len .Participants) 1}}s{{end}} quitte la liste
+                                d'attente pour la balade écologique suivante :</p>
+                            {{else}}
                             <p style="margin: 0;">Nous avons bien reçu votre réservation pour {{len .Participants}}
                                 participant{{if gt (len .Participants) 1}}s{{end}} à la balade écologique suivante :</p>
+                            {{end}}
                         </td>
                     </tr>
                     <!-- RESERVATION SUMMARY -->
@@ -186,12 +211,12 @@
                             <p style="margin: 0 0 15px 0;">Il ne reste pas assez de places pour tous vos participants :
                                 toute votre réservation est placée sur <strong>liste d'attente</strong>. Elle passera
                                 en entier dès que la place le permettra, et nous vous préviendrons.</p>
-                            {{else if eq .Status "confirmed"}}
+                            {{else if and (eq .Status "confirmed") (or (eq .Change "") (eq .Change "promoted"))}}
                             <p style="margin: 0 0 15px 0;">La balade a lieu dans moins de 3 jours : votre réservation
                                 est directement <strong>confirmée</strong>.{{if .PaymentEnabled}} Vous pouvez régler
                                 votre participation depuis votre réservation.{{end}}</p>
                             {{end}}
-                            {{if ne .Status "confirmed"}}
+                            {{if and (ne .Status "confirmed") (ne .Status "cancelled")}}
                             <p style="margin: 0 0 15px 0;"><strong>Prochaine étape : confirmation et paiement 3 jours avant la balade.</strong>
                                 Vous recevrez alors un email pour confirmer votre réservation{{if .PaymentEnabled}} et
                                 la régler{{end}}. Rien n'est à payer pour le moment.</p>

@@ -48,6 +48,42 @@ func errReservationAlreadyExists(reservationID uint) error {
 	}
 }
 
+func errNotEnoughPlaces(placesLeft int) error {
+	return &businessError{
+		status:  http.StatusConflict,
+		reason:  "not_enough_places",
+		message: fmt.Sprintf("the participants do not fit in the %d places left", max(placesLeft, 0)),
+	}
+}
+
+func errReservationCancelled() error {
+	return &businessError{status: http.StatusConflict, reason: "reservation_cancelled", message: "the reservation is cancelled"}
+}
+
+func errReservationConfirmed() error {
+	return &businessError{
+		status:  http.StatusConflict,
+		reason:  "reservation_confirmed",
+		message: "participants cannot be added to a confirmed reservation yet",
+	}
+}
+
+func errReservationPaid() error {
+	return &businessError{
+		status:  http.StatusConflict,
+		reason:  "reservation_paid",
+		message: "participants cannot be modified once the reservation is paid",
+	}
+}
+
+func errParticipantNotFound() error {
+	return &businessError{status: http.StatusNotFound, reason: "participant_not_found", message: "no such participant in this reservation"}
+}
+
+func errSecondBooker() error {
+	return &businessError{status: http.StatusBadRequest, reason: "second_booker", message: "only one participant can be the booker"}
+}
+
 func renderError(err error) render.Renderer {
 	var business *businessError
 	if errors.As(err, &business) {

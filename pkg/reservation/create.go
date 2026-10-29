@@ -66,6 +66,12 @@ func (config *Config) decideInitialStatus(reservation *dbmodel.Reservation, ramb
 		return
 	}
 
+	config.admit(reservation, ramble)
+}
+
+// admit gives a place to the reservation: it is pending, or confirmed right
+// away when the ramble is within the confirmation period.
+func (config *Config) admit(reservation *dbmodel.Reservation, ramble *dbmodel.Ramble) {
 	now := config.Clock.Now()
 	if ramble.Date != nil {
 		untilRamble := ramble.Date.Sub(now)

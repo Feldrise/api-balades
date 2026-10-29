@@ -10,9 +10,29 @@ import (
 	"feldrise.com/balade/pkg/notifications/email"
 )
 
-// sendReservationConfirmationEmail sends the reservation summary to the booker
-// only. A failure is logged without failing the reservation.
+// Changes told by the reservation summary email.
+const (
+	changeNone                = ""
+	changeParticipantsAdded   = "participants_added"
+	changeParticipantsRemoved = "participants_removed"
+	changePromoted            = "promoted"
+)
+
+var emailSubjects = map[string]string{
+	changeNone:                "Confirmation de réservation - Balade Écologique",
+	changeParticipantsAdded:   "Participants ajoutés à votre réservation - Balade Écologique",
+	changeParticipantsRemoved: "Participants retirés de votre réservation - Balade Écologique",
+	changePromoted:            "Place disponible - Balade Écologique",
+}
+
+// sendReservationConfirmationEmail sends the summary of a new reservation to the booker.
 func (config *Config) sendReservationConfirmationEmail(reservation *dbmodel.Reservation) {
+	config.sendReservationEmail(reservation, changeNone)
+}
+
+// sendReservationEmail sends the reservation summary, after change, to the
+// booker only. A failure is logged without failing the request.
+func (config *Config) sendReservationEmail(reservation *dbmodel.Reservation, change string) {
 	ramble := reservation.Ramble
 
 	participants := make([]email.ReservationParticipantInfo, len(reservation.Participants))
@@ -30,6 +50,7 @@ func (config *Config) sendReservationConfirmationEmail(reservation *dbmodel.Rese
 		Date:             formatDate(ramble.Date),
 		Location:         formatLocation(ramble.Location),
 		Status:           reservation.Status,
+		Change:           change,
 		Participants:     participants,
 		HasPrices:        len(ramble.Prices) > 0,
 		EstimatedAmount:  formatCents(reservation.EstimatedAmount()),
@@ -40,12 +61,12 @@ func (config *Config) sendReservationConfirmationEmail(reservation *dbmodel.Rese
 
 	err := config.EmailService.Send(
 		reservation.ContactEmail,
-		"Confirmation de réservation - Balade Écologique",
+		emailSubjects[change],
 		"reservation_confirmation",
 		data,
 	)
 	if err != nil {
-		log.Printf("Failed to send reservation confirmation email for reservation %d: %v", reservation.ID, err)
+		log.Printf("Failed to send reservation email for reservation %d: %v", reservation.ID, err)
 	}
 }
 

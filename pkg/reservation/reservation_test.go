@@ -145,3 +145,91 @@ func TestBookerReservesForSeveralParticipantsWithPrices(t *testing.T) {
 		t.Errorf("expected an empty payment list, got %s", response.Body)
 	}
 }
+
+func TestBookerReservesOnlyForOthersWithASingleAccount(t *testing.T) {
+	h := testharness.New(t)
+	morning := h.CreateRamble(familyRamble())
+	evening := h.CreateRamble(familyRamble())
+
+	reserve(t, h, reservationPayload{
+		RambleID:     morning.ID,
+		ContactEmail: "parent@example.com",
+		Participants: []participantPayload{
+			{FirstName: "Léa", LastName: "Petit", PriceLabel: "Enfant"},
+			{FirstName: "Hugo", LastName: "Petit", PriceLabel: "Enfant"},
+		},
+	})
+	reserve(t, h, reservationPayload{
+		RambleID:     evening.ID,
+		ContactEmail: "parent@example.com",
+		Participants: []participantPayload{{FirstName: "Léa", LastName: "Petit", PriceLabel: "Enfant"}},
+	})
+
+	var mine []reservation
+	h.Do(http.MethodGet, "/reservations", nil, h.Login("parent@example.com")).JSON(t, &mine)
+
+	if len(mine) != 2 {
+		t.Fatalf("expected both reservations on the booker's single account, got %d", len(mine))
+	}
+	for _, r := range mine {
+		for _, p := range r.Participants {
+			if p.IsBooker {
+				t.Errorf("expected no participant marked as the booker, got %+v", p)
+			}
+		}
+	}
+}
+
+func TestReservationParticipantsMustHaveAPriceOfTheRamble(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(familyRamble())
+
+	for name, label := range map[string]string{"unknown price": "Senior", "missing price": ""} {
+		t.Run(name, func(t *testing.T) {
+			response := h.Do(http.MethodPost, "/reservations", reservationPayload{
+				RambleID:     ramble.ID,
+				ContactEmail: "alice@example.com",
+				Participants: []participantPayload{{FirstName: "Alice", LastName: "Martin", PriceLabel: label}},
+			}, "")
+
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", response.Code, response.Body)
+			}
+			var body errorBody
+			response.JSON(t, &body)
+			if body.Reason != "invalid_price" {
+				t.Errorf("expected reason invalid_price, got %s", response.Body)
+			}
+		})
+	}
+}
+
+func TestSinglePriceIsAppliedWhenParticipantsHaveNoPrice(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(testharness.RambleOptions{Prices: []testharness.Price{{Label: "Plein tarif", Amount: 8}}})
+
+	created := reserve(t, h, reservationPayload{
+		RambleID:     ramble.ID,
+		ContactEmail: "alice@example.com",
+		Participants: people(2, ""),
+	})
+
+	if created.EstimatedAmount != 1600 || created.Participants[0].PriceLabel != "Plein tarif" {
+		t.Errorf("expected the single price on every participant (16 €), got %+v", created)
+	}
+}
+
+func TestFreeRambleReservationHasNoAmount(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(testharness.RambleOptions{})
+
+	created := reserve(t, h, reservationPayload{
+		RambleID:     ramble.ID,
+		ContactEmail: "alice@example.com",
+		Participants: people(3, ""),
+	})
+
+	if created.EstimatedAmount != 0 || len(created.Participants) != 3 || created.Participants[0].PriceLabel != "" {
+		t.Errorf("expected 3 participants without price, got %+v", created)
+	}
+}

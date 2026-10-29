@@ -1,6 +1,8 @@
 package reservation
 
 import (
+	"fmt"
+
 	"feldrise.com/balade/database/dbmodel"
 	"feldrise.com/balade/pkg/model"
 )
@@ -8,10 +10,15 @@ import (
 func (config *Config) createReservation(data *model.ReservationCreatePayload, ramble *dbmodel.Ramble) (*dbmodel.Reservation, error) {
 	participants := make([]dbmodel.Participant, len(data.Participants))
 	for i, participant := range data.Participants {
+		priceLabel, err := resolvePriceLabel(ramble, participant.PriceLabel)
+		if err != nil {
+			return nil, err
+		}
+
 		participants[i] = dbmodel.Participant{
 			FirstName:  participant.FirstName,
 			LastName:   participant.LastName,
-			PriceLabel: participant.PriceLabel,
+			PriceLabel: priceLabel,
 			IsBooker:   participant.IsBooker,
 		}
 	}
@@ -56,4 +63,27 @@ func (config *Config) findOrCreateBooker(data *model.ReservationCreatePayload) (
 		Email:       data.ContactEmail,
 		UserProfile: profile,
 	})
+}
+
+// resolvePriceLabel checks that label is one of the ramble's prices. A ramble
+// without price takes no label, and a ramble with a single price applies it by default.
+func resolvePriceLabel(ramble *dbmodel.Ramble, label string) (string, error) {
+	if len(ramble.Prices) == 0 {
+		return "", nil
+	}
+
+	if label == "" {
+		if len(ramble.Prices) == 1 {
+			return ramble.Prices[0].Label, nil
+		}
+		return "", errInvalidPrice("each participant needs a price of the ramble")
+	}
+
+	for _, price := range ramble.Prices {
+		if price.Label == label {
+			return label, nil
+		}
+	}
+
+	return "", errInvalidPrice(fmt.Sprintf("unknown price %q for this ramble", label))
 }

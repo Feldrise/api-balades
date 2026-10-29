@@ -25,6 +25,28 @@ type RegistrationConfirmationData struct {
 	Prices          []PriceInfo
 }
 
+type ReservationConfirmationData struct {
+	Title    string
+	Date     string
+	Location string
+	// Status is pending, confirmed or waiting_list.
+	Status       string
+	Participants []ReservationParticipantInfo
+	// HasPrices tells whether the ramble has prices, so an estimated amount.
+	HasPrices bool
+	// EstimatedAmount is formatted, e.g. "18,50 €".
+	EstimatedAmount string
+	PaymentEnabled  bool
+	ReservationURL  string
+}
+
+type ReservationParticipantInfo struct {
+	Name       string
+	PriceLabel string
+	// Price is formatted, e.g. "12,50 €".
+	Price string
+}
+
 type PriceInfo struct {
 	Label  string
 	Amount float64

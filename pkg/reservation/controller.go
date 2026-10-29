@@ -51,6 +51,8 @@ func (config *Config) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	config.sendReservationConfirmationEmail(reservation)
+
 	render.Status(r, http.StatusCreated)
 	render.JSON(w, r, reservation.ToModel())
 }

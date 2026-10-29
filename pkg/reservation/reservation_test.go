@@ -3,6 +3,7 @@ package reservation_test
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -444,5 +445,52 @@ func TestAnonymousVisitorCannotListReservations(t *testing.T) {
 
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d: %s", response.Code, response.Body)
+	}
+}
+
+func TestBookerAloneReceivesAReservationSummaryEmail(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(familyRamble())
+
+	reserve(t, h, reservationPayload{
+		RambleID:     ramble.ID,
+		ContactEmail: "alice@example.com",
+		Participants: []participantPayload{
+			{FirstName: "Bruno", LastName: "Martin", PriceLabel: "Adulte"},
+			{FirstName: "Chloé", LastName: "Martin", PriceLabel: "Enfant"},
+		},
+	})
+
+	sent := h.Emails.Sent()
+	if len(sent) != 1 {
+		t.Fatalf("expected a single email, got %d", len(sent))
+	}
+	email := sent[0]
+	if email.To != "alice@example.com" {
+		t.Errorf("expected the email to go to the booker, got %q", email.To)
+	}
+	for _, expected := range []string{
+		ramble.Title,
+		"Bruno Martin", "Chloé Martin",
+		"Adulte", "12,50 €", "Enfant", "6,00 €",
+		"18,50 €",
+		"confirmation et paiement 3 jours avant la balade",
+	} {
+		if !strings.Contains(email.Body, expected) {
+			t.Errorf("expected the email to contain %q", expected)
+		}
+	}
+}
+
+func TestWaitingListReservationEmailTellsTheReservationWaits(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(testharness.RambleOptions{MaxParticipants: testharness.Int(2)})
+	reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "first@example.com", Participants: people(1, "")})
+
+	reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "")})
+
+	sent := h.Emails.Sent()
+	if len(sent) != 2 || sent[1].To != "alice@example.com" || !strings.Contains(sent[1].Body, "liste d'attente") {
+		t.Fatalf("expected an email to alice mentioning the waiting list, got %+v", sent)
 	}
 }

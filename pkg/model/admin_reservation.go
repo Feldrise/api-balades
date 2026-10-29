@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"net/http"
+	"strings"
 )
 
 // AdminReservationFilterPayload filters the reservations listed to admins and guides.
@@ -109,3 +110,31 @@ type BulkReservationActionError struct {
 	ReservationID uint   `json:"reservation_id"`
 	Error         string `json:"error"`
 } // @name BulkReservationActionError
+
+// AdminParticipantUpdatePayload changes the name or the price of a participant,
+// the omitted fields being kept.
+type AdminParticipantUpdatePayload struct {
+	FirstName  *string `json:"first_name,omitempty"`
+	LastName   *string `json:"last_name,omitempty"`
+	PriceLabel *string `json:"price_label,omitempty"`
+} // @name AdminParticipantUpdatePayload
+
+func (payload *AdminParticipantUpdatePayload) Bind(r *http.Request) error {
+	if payload.FirstName != nil {
+		trimmed := strings.TrimSpace(*payload.FirstName)
+		payload.FirstName = &trimmed
+		if trimmed == "" {
+			return errors.New("first name cannot be empty")
+		}
+	}
+
+	if payload.LastName != nil {
+		trimmed := strings.TrimSpace(*payload.LastName)
+		payload.LastName = &trimmed
+		if trimmed == "" {
+			return errors.New("last name cannot be empty")
+		}
+	}
+
+	return nil
+}

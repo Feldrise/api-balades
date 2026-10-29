@@ -93,9 +93,27 @@ func (config *Config) removeParticipant(reservation *dbmodel.Reservation, partic
 	return result, err
 }
 
+// participantChange is a change of the name or the price of a participant, nil
+// fields being kept.
+type participantChange struct {
+	firstName  *string
+	lastName   *string
+	priceLabel *string
+}
+
 // updateParticipant changes the name and price of a participant, as long as
 // the reservation is not paid.
 func (config *Config) updateParticipant(reservation *dbmodel.Reservation, participantID uint, payload *model.ParticipantUpdatePayload) error {
+	return config.changeParticipant(reservation, participantID, participantChange{
+		firstName:  &payload.FirstName,
+		lastName:   &payload.LastName,
+		priceLabel: &payload.PriceLabel,
+	}, false)
+}
+
+// changeParticipant applies the change to a participant. Once the reservation is
+// paid, nothing can change, or with nameOnly only the price is frozen.
+func (config *Config) changeParticipant(reservation *dbmodel.Reservation, participantID uint, change participantChange, nameOnly bool) error {
 	return config.ReservationRepository.ModifyForRamble(reservation.RambleID, func(locked *dbmodel.LockedRamble) error {
 		active := locked.Reservation(reservation.ID)
 		if active == nil {
@@ -105,17 +123,28 @@ func (config *Config) updateParticipant(reservation *dbmodel.Reservation, partic
 		if participant == nil {
 			return errParticipantNotFound()
 		}
-		if active.HasSuccessfulPayment() {
+		paid := active.HasSuccessfulPayment()
+		if paid && !nameOnly {
 			return errReservationPaid()
 		}
 
-		priceLabel, err := resolvePriceLabel(locked.Ramble, payload.PriceLabel)
-		if err != nil {
-			return err
+		priceLabel := participant.PriceLabel
+		if change.priceLabel != nil {
+			var err error
+			if priceLabel, err = resolvePriceLabel(locked.Ramble, *change.priceLabel); err != nil {
+				return err
+			}
+			if paid && priceLabel != participant.PriceLabel {
+				return errReservationPaid()
+			}
 		}
 
-		participant.FirstName = payload.FirstName
-		participant.LastName = payload.LastName
+		if change.firstName != nil {
+			participant.FirstName = *change.firstName
+		}
+		if change.lastName != nil {
+			participant.LastName = *change.lastName
+		}
 		participant.PriceLabel = priceLabel
 		return locked.UpdateParticipant(participant)
 	})

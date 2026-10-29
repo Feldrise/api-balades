@@ -439,3 +439,60 @@ func (config *Config) bulkAction(user *dbmodel.User, id uint, data *model.BulkRe
 
 	return updated.ToModel(), nil
 }
+
+// @Summary Update a participant of a reservation (admin)
+// @Description Change the name or the price of a participant, to correct an error. The omitted fields are kept. Once the reservation is paid, the price is frozen but the name can still be corrected.
+// @Tags admin,reservations
+// @Accept json
+// @Produce json
+// @Param id path int true "Reservation ID"
+// @Param participantId path int true "Participant ID"
+// @Param participant body model.AdminParticipantUpdatePayload true "Participant data"
+// @Success 200 {object} model.Reservation
+// @Failure 400 {object} errors.ErrResponse
+// @Failure 401 {object} errors.ErrResponse
+// @Failure 403 {object} errors.ErrResponse
+// @Failure 404 {object} errors.ErrResponse
+// @Failure 409 {object} errors.ErrResponse "reservation_paid or reservation_cancelled"
+// @Router /reservations/admin/{id}/participants/{participantId} [put]
+func (config *Config) AdminUpdateParticipant(w http.ResponseWriter, r *http.Request) {
+	user := authentication.ForContext(r.Context())
+	if user == nil {
+		render.Render(w, r, errors.ErrUnauthorized("authentication required"))
+		return
+	}
+
+	id, ok := parseID(w, r, "id")
+	if !ok {
+		return
+	}
+	participantID, ok := parseID(w, r, "participantId")
+	if !ok {
+		return
+	}
+
+	data := &model.AdminParticipantUpdatePayload{}
+	if err := render.Bind(r, data); err != nil {
+		render.Render(w, r, errors.ErrInvalidRequest(err))
+		return
+	}
+
+	reservation, ok := config.reservationToAdminister(w, r, user, id, "update:registration-details", "update:registration-details:self")
+	if !ok {
+		return
+	}
+
+	change := participantChange{firstName: data.FirstName, lastName: data.LastName, priceLabel: data.PriceLabel}
+	if err := config.changeParticipant(reservation, participantID, change, true); err != nil {
+		render.Render(w, r, renderError(err))
+		return
+	}
+
+	updated, err := config.ReservationRepository.FindByID(id)
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return
+	}
+
+	render.JSON(w, r, updated.ToModel())
+}

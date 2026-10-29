@@ -673,3 +673,107 @@ func TestAdminBulkActionIsRestrictedToAuthorizedStaffAndTheirRambles(t *testing.
 		t.Errorf("expected the reservation of another ramble to be untouched, got %q", got.Status)
 	}
 }
+
+type adminParticipantPayload struct {
+	FirstName  *string `json:"first_name,omitempty"`
+	LastName   *string `json:"last_name,omitempty"`
+	PriceLabel *string `json:"price_label,omitempty"`
+}
+
+func adminUpdateParticipant(h *testharness.Harness, id uint, participantID uint, payload adminParticipantPayload, token string) *testharness.Response {
+	return h.Do(http.MethodPut, fmt.Sprintf("/reservations/admin/%d/participants/%d", id, participantID), payload, token)
+}
+
+func stringPtr(value string) *string {
+	return &value
+}
+
+func TestAdminChangesTheNameAndPriceOfAParticipantKeepingTheOtherFields(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(familyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	admin := h.Token(h.CreateUser("admin@example.com", "admin"))
+	target := created.Participants[1]
+
+	response := adminUpdateParticipant(h, created.ID, target.ID, adminParticipantPayload{FirstName: stringPtr("Zoé")}, admin)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body)
+	}
+	var got reservation
+	response.JSON(t, &got)
+	if p := got.Participants[1]; p.FirstName != "Zoé" || p.LastName != target.LastName || p.PriceLabel != "Adulte" {
+		t.Errorf("expected only the first name to change, got %+v", p)
+	}
+
+	response = adminUpdateParticipant(h, created.ID, target.ID, adminParticipantPayload{LastName: stringPtr("Durand"), PriceLabel: stringPtr("Enfant")}, admin)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body)
+	}
+	saved := getReservation(t, h, created.ID, admin)
+	if p := saved.Participants[1]; p.FirstName != "Zoé" || p.LastName != "Durand" || p.PriceLabel != "Enfant" || saved.EstimatedAmount != 1850 {
+		t.Errorf("expected Zoé Durand as Enfant for a reservation of 18,50 €, got %+v (%d)", p, saved.EstimatedAmount)
+	}
+}
+
+func TestAdminCanCorrectTheNameOfAPaidParticipantButNotItsPrice(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(familyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	h.PayReservation(created.ID, 2500)
+	admin := h.Token(h.CreateUser("admin@example.com", "admin"))
+	target := created.Participants[0].ID
+
+	if response := adminUpdateParticipant(h, created.ID, target, adminParticipantPayload{FirstName: stringPtr("Zoé"), PriceLabel: stringPtr("Adulte")}, admin); response.Code != http.StatusOK {
+		t.Fatalf("expected the name to be corrected, got %d: %s", response.Code, response.Body)
+	}
+
+	response := adminUpdateParticipant(h, created.ID, target, adminParticipantPayload{PriceLabel: stringPtr("Enfant")}, admin)
+
+	if response.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", response.Code, response.Body)
+	}
+	var body errorBody
+	response.JSON(t, &body)
+	if body.Reason != "reservation_paid" {
+		t.Errorf("expected reason reservation_paid, got %s", response.Body)
+	}
+	if got := getReservation(t, h, created.ID, admin); got.Participants[0].FirstName != "Zoé" || got.Participants[0].PriceLabel != "Adulte" {
+		t.Errorf("expected Zoé to keep the Adulte price, got %+v", got.Participants[0])
+	}
+}
+
+func TestAdminParticipantChangeIsValidatedAndRestrictedToAuthorizedStaff(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(familyRamble())
+	otherRamble := h.CreateRamble(familyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(1, "Adulte")})
+	other := reserve(t, h, reservationPayload{RambleID: otherRamble.ID, ContactEmail: "bob@example.com", Participants: people(1, "Adulte")})
+	owningGuide := h.CreateUser("guide@example.com", "guide")
+	h.CreateGuide(owningGuide, ramble)
+	rename := adminParticipantPayload{FirstName: stringPtr("Zoé")}
+
+	for _, c := range []struct {
+		name          string
+		id            uint
+		participantID uint
+		payload       adminParticipantPayload
+		token         string
+		code          int
+	}{
+		{"anonymous visitor", created.ID, created.Participants[0].ID, rename, "", http.StatusUnauthorized},
+		{"the booker", created.ID, created.Participants[0].ID, rename, h.Login("alice@example.com"), http.StatusForbidden},
+		{"guide of another ramble", other.ID, other.Participants[0].ID, rename, h.Token(owningGuide), http.StatusForbidden},
+		{"empty name", created.ID, created.Participants[0].ID, adminParticipantPayload{FirstName: stringPtr(" ")}, h.Token(owningGuide), http.StatusBadRequest},
+		{"unknown price", created.ID, created.Participants[0].ID, adminParticipantPayload{PriceLabel: stringPtr("Senior")}, h.Token(owningGuide), http.StatusBadRequest},
+		{"participant of another reservation", created.ID, other.Participants[0].ID, rename, h.Token(owningGuide), http.StatusNotFound},
+		{"guide of the ramble", created.ID, created.Participants[0].ID, rename, h.Token(owningGuide), http.StatusOK},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if response := adminUpdateParticipant(h, c.id, c.participantID, c.payload, c.token); response.Code != c.code {
+				t.Fatalf("expected %d, got %d: %s", c.code, response.Code, response.Body)
+			}
+		})
+	}
+}

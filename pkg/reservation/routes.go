@@ -19,6 +19,7 @@ func (config *Config) Routes() *chi.Mux {
 		r.Put("/{id}/status", config.AdminUpdateStatus)
 		r.Delete("/{id}", config.AdminDelete)
 		r.Post("/bulk-action", config.AdminBulkAction)
+		r.Put("/{id}/participants/{participantId}", config.AdminUpdateParticipant)
 	})
 
 	router.Post("/", config.Create)

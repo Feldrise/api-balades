@@ -29,9 +29,14 @@ type Reservation struct {
 	// EstimatedAmount is incomplete.
 	HasMissingPrices bool                 `json:"has_missing_prices"`
 	Payments         []ReservationPayment `json:"payments"`
-	// HasSuccessfulPayment tells that a payment succeeded: after a removal or a
-	// cancellation, the booker is invited to contact the guide for a refund.
+	// HasSuccessfulPayment tells that an amount paid is kept (a payment succeeded
+	// and not entirely refunded): after a removal or a cancellation, the booker
+	// is invited to contact the guide for a refund.
 	HasSuccessfulPayment bool `json:"has_successful_payment"`
+	// AmountPaid is the amount in cents paid and kept: the payments succeeded minus their refunds.
+	AmountPaid int64 `json:"amount_paid"`
+	// AmountDue is the amount in cents left to pay: EstimatedAmount minus AmountPaid, never below zero.
+	AmountDue int64 `json:"amount_due"`
 
 	Ramble *ReservationRamble `json:"ramble,omitempty"`
 } // @name Reservation
@@ -69,7 +74,7 @@ type ReservationPayment struct {
 	// Amount is in cents.
 	Amount       int64      `json:"amount"`
 	Currency     string     `json:"currency"`
-	Status       string     `json:"status"` // pending, succeeded, failed, cancelled, refunded
+	Status       string     `json:"status"` // pending, requires_action, succeeded, failed, cancelled, partially_refunded, refunded
 	PaidAt       *time.Time `json:"paid_at,omitempty"`
 	RefundedAt   *time.Time `json:"refunded_at,omitempty"`
 	RefundAmount *int64     `json:"refund_amount,omitempty"`

@@ -224,8 +224,16 @@ func (s *paymentService) RefundPayment(paymentID uint, amount *int64, reason *st
 		return errors.New("payment not found")
 	}
 
-	if payment.Status != "succeeded" {
+	if payment.Status != "succeeded" && payment.Status != "partially_refunded" {
 		return errors.New("can only refund succeeded payments")
+	}
+
+	refundable := payment.Amount - payment.RefundedAmount()
+	if amount == nil {
+		amount = &refundable
+	}
+	if *amount <= 0 || *amount > refundable {
+		return fmt.Errorf("the refund must be between 1 and %d cents", refundable)
 	}
 
 	// Get guide credentials
@@ -240,15 +248,15 @@ func (s *paymentService) RefundPayment(paymentID uint, amount *int64, reason *st
 		return fmt.Errorf("failed to process refund: %w", err)
 	}
 
-	// Update payment record
-	payment.Status = "refunded"
+	// Update payment record: the refunds add up, and the payment is refunded once entirely
+	refunded := payment.RefundedAmount() + *amount
+	payment.RefundAmount = &refunded
+	payment.Status = "partially_refunded"
+	if refunded >= payment.Amount {
+		payment.Status = "refunded"
+	}
 	now := time.Now()
 	payment.RefundedAt = &now
-	if amount != nil {
-		payment.RefundAmount = amount
-	} else {
-		payment.RefundAmount = &payment.Amount
-	}
 
 	_, err = s.paymentRepo.Update(payment)
 	if err != nil {

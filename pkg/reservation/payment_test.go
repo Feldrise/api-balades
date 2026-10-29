@@ -149,3 +149,58 @@ func TestPendingPaymentsAreCancelledWithTheReservation(t *testing.T) {
 		t.Errorf("expected the pending payment cancelled on Stripe, got %v", cancelled)
 	}
 }
+
+type refundedReservation struct {
+	reservation
+	HasSuccessfulPayment bool  `json:"has_successful_payment"`
+	AmountPaid           int64 `json:"amount_paid"`
+	AmountDue            int64 `json:"amount_due"`
+	Payments             []struct {
+		Status       string `json:"status"`
+		Amount       int64  `json:"amount"`
+		RefundAmount *int64 `json:"refund_amount"`
+	} `json:"payments"`
+}
+
+func int64Ptr(value int64) *int64 {
+	return &value
+}
+
+func TestPartiallyRefundedPaymentCountsForItsNetAmount(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	h.Clock.Set(ramble.Date.Add(-2 * 24 * time.Hour))
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	paid := h.PayReservation(created.ID, 2500)
+	admin := h.Token(h.CreateUser("admin@example.com", "admin"))
+	token := h.Login("alice@example.com")
+
+	if response := refundPayment(h, paid.ID, int64Ptr(1000), admin); response.Code != http.StatusOK {
+		t.Fatalf("refunding: expected 200, got %d: %s", response.Code, response.Body)
+	}
+
+	var got refundedReservation
+	h.Do(http.MethodGet, fmt.Sprintf("/reservations/%d", created.ID), nil, token).JSON(t, &got)
+	if !got.HasSuccessfulPayment || got.AmountPaid != 1500 || got.AmountDue != 1000 {
+		t.Errorf("expected 15,00 € paid and 10,00 € due, got paid %d, due %d, successful %v", got.AmountPaid, got.AmountDue, got.HasSuccessfulPayment)
+	}
+	if p := got.Payments[0]; p.Status != "partially_refunded" || p.RefundAmount == nil || *p.RefundAmount != 1000 {
+		t.Errorf("expected the payment partially refunded of 10,00 €, got %+v", p)
+	}
+	var confirmed reservationWithPayment
+	confirmReservation(h, created.ID, token).JSON(t, &confirmed)
+	if confirmed.Payment == nil || confirmed.Payment.Payment.Amount != 1000 {
+		t.Errorf("expected the 10,00 € refunded to be due again, got %+v", confirmed.Payment)
+	}
+
+	if response := refundPayment(h, paid.ID, nil, admin); response.Code != http.StatusOK {
+		t.Fatalf("refunding the rest: expected 200, got %d: %s", response.Code, response.Body)
+	}
+	h.Do(http.MethodGet, fmt.Sprintf("/reservations/%d", created.ID), nil, token).JSON(t, &got)
+	if got.HasSuccessfulPayment || got.AmountPaid != 0 || got.Payments[0].Status != "refunded" || *got.Payments[0].RefundAmount != 2500 {
+		t.Errorf("expected the payment entirely refunded, got %+v", got)
+	}
+	if refunds := h.Stripe.Refunds(); len(refunds) != 2 || refunds[1].Amount == nil || *refunds[1].Amount != 1500 {
+		t.Errorf("expected the second refund to be of the 15,00 € left, got %+v", refunds)
+	}
+}

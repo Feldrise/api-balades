@@ -19,7 +19,7 @@ type Payment struct {
 	// Payment details
 	Amount        int64   `gorm:"not null"`                   // Amount in cents
 	Currency      string  `gorm:"not null;default:'eur'"`     // Currency code
-	Status        string  `gorm:"not null;default:'pending'"` // pending, succeeded, failed, cancelled, refunded
+	Status        string  `gorm:"not null;default:'pending'"` // pending, requires_action, succeeded, failed, cancelled, partially_refunded, refunded
 	PaymentMethod string  `gorm:"default:'card'"`             // card, sepa, etc.
 	FailureReason *string `gorm:""`                           // Reason for payment failure
 
@@ -44,6 +44,28 @@ type Payment struct {
 
 	// Foreign Objects
 	Guide Guide `gorm:"foreignKey:GuideID"`
+}
+
+// IsCollected reports whether the payment was paid, whether it has been refunded since or not.
+func (p *Payment) IsCollected() bool {
+	return p.Status == "succeeded" || p.Status == "partially_refunded" || p.Status == "refunded"
+}
+
+// RefundedAmount returns the amount in cents refunded so far.
+func (p *Payment) RefundedAmount() int64 {
+	if p.RefundAmount == nil {
+		return 0
+	}
+	return *p.RefundAmount
+}
+
+// NetAmount returns the amount in cents collected and kept: the amount paid
+// minus the refunds, 0 when the payment was not paid.
+func (p *Payment) NetAmount() int64 {
+	if !p.IsCollected() {
+		return 0
+	}
+	return max(p.Amount-p.RefundedAmount(), 0)
 }
 
 // IsPending reports whether the payment is still to be paid by the payer.

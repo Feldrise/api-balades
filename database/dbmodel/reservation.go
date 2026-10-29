@@ -127,26 +127,26 @@ func (r *Reservation) HasMissingPrices() bool {
 	return false
 }
 
-// HasSuccessfulPayment reports whether a payment of the reservation succeeded.
+// HasSuccessfulPayment reports whether the reservation keeps an amount paid,
+// that is a payment succeeded and not entirely refunded.
 func (r *Reservation) HasSuccessfulPayment() bool {
-	for _, payment := range r.Payments {
-		if payment.Status == "succeeded" {
-			return true
-		}
+	return r.AmountPaid() > 0
+}
+
+// AmountPaid returns the amount in cents collected and kept: the payments
+// succeeded, minus their refunds.
+func (r *Reservation) AmountPaid() int64 {
+	var paid int64
+	for i := range r.Payments {
+		paid += r.Payments[i].NetAmount()
 	}
-	return false
+	return paid
 }
 
 // AmountDue returns the amount in cents left to pay: the estimated amount
-// minus the succeeded payments, never below zero.
+// minus the amount paid, never below zero.
 func (r *Reservation) AmountDue() int64 {
-	due := r.EstimatedAmount()
-	for _, payment := range r.Payments {
-		if payment.Status == "succeeded" {
-			due -= payment.Amount
-		}
-	}
-	return max(due, 0)
+	return max(r.EstimatedAmount()-r.AmountPaid(), 0)
 }
 
 // EstimatedAmount returns the amount in cents of the reservation, computed from
@@ -209,6 +209,8 @@ func (r *Reservation) ToModel() *model.Reservation {
 		HasMissingPrices:     r.HasMissingPrices(),
 		Payments:             payments,
 		HasSuccessfulPayment: r.HasSuccessfulPayment(),
+		AmountPaid:           r.AmountPaid(),
+		AmountDue:            r.AmountDue(),
 	}
 
 	if r.Ramble.ID != 0 {

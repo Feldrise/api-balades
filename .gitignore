@@ -27,3 +27,8 @@ exports/savon.pdf
 __debug_bin*
 
 server/w
+# Local database backups and working docs
+/docker/backup_*.sql
+/docker/backups/
+/docs/frontend-changements-cliente.md
+/docs/frontend-guide-role.md

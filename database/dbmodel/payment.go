@@ -23,7 +23,10 @@ type Payment struct {
 	PaymentMethod string  `gorm:"default:'card'"`             // card, sepa, etc.
 	FailureReason *string `gorm:""`                           // Reason for payment failure
 
-	// Registration relationship
+	// Reservation relationship
+	ReservationID *uint `gorm:"index"`
+
+	// Legacy registration relationship
 	RegistrationID *uint `gorm:"index"`
 	GroupID        *uint `gorm:"index"`
 
@@ -57,6 +60,7 @@ func (p Payment) ToModel() model.Payment {
 		Status:                p.Status,
 		PaymentMethod:         p.PaymentMethod,
 		FailureReason:         p.FailureReason,
+		ReservationID:         p.ReservationID,
 		RegistrationID:        p.RegistrationID,
 		GroupID:               p.GroupID,
 		PayerEmail:            p.PayerEmail,

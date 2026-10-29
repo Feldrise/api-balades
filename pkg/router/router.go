@@ -10,6 +10,7 @@ import (
 	"feldrise.com/balade/pkg/payment"
 	"feldrise.com/balade/pkg/ramble"
 	"feldrise.com/balade/pkg/registration"
+	"feldrise.com/balade/pkg/reservation"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
 	"github.com/go-chi/render"
@@ -40,6 +41,7 @@ func New(configuration *config.Config) *chi.Mux {
 		r.Mount("/guides", guide.New(configuration).Routes())
 		r.Mount("/rambles", ramble.New(configuration).Routes())
 		r.Mount("/registrations", registration.New(configuration).Routes())
+		r.Mount("/reservations", reservation.New(configuration).Routes())
 		r.Mount("/payments", payment.Routes(configuration.PaymentService))
 	})
 

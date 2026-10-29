@@ -23,6 +23,8 @@ func Migrate(database *gorm.DB) {
 		&dbmodel.RambleGuide{},
 		&dbmodel.RambleRegistrationGroup{},
 		&dbmodel.RambleRegistration{},
+		&dbmodel.Reservation{},
+		&dbmodel.Participant{},
 		&dbmodel.Payment{},
 	)
 

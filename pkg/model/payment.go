@@ -22,7 +22,10 @@ type Payment struct {
 	PaymentMethod string  `json:"payment_method"`           // card, sepa, etc.
 	FailureReason *string `json:"failure_reason,omitempty"` // Reason for payment failure
 
-	// Registration relationship
+	// Reservation relationship
+	ReservationID *uint `json:"reservation_id,omitempty"`
+
+	// Legacy registration relationship
 	RegistrationID *uint `json:"registration_id,omitempty"`
 	GroupID        *uint `json:"group_id,omitempty"`
 

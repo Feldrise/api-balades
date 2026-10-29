@@ -5,14 +5,15 @@ import (
 
 	"feldrise.com/balade/database/dbmodel"
 	"feldrise.com/balade/pkg/authentication"
+	"feldrise.com/balade/pkg/notifications/email"
 )
 
 // CreateUser inserts a user with the given roles ("admin", "user", "guide").
-func (h *Harness) CreateUser(email string, roles ...string) *dbmodel.User {
+func (h *Harness) CreateUser(address string, roles ...string) *dbmodel.User {
 	h.t.Helper()
 
 	user := &dbmodel.User{
-		Email:       email,
+		Email:       address,
 		UserProfile: dbmodel.UserProfile{FirstName: "Test"},
 	}
 
@@ -25,7 +26,7 @@ func (h *Harness) CreateUser(email string, roles ...string) *dbmodel.User {
 	}
 
 	if err := h.DB.Create(user).Error; err != nil {
-		h.t.Fatalf("creating user %q: %v", email, err)
+		h.t.Fatalf("creating user %q: %v", address, err)
 	}
 
 	return user
@@ -102,4 +103,42 @@ func (h *Harness) CreateRamble(options RambleOptions) *dbmodel.Ramble {
 // Int returns a pointer to value.
 func Int(value int) *int {
 	return &value
+}
+
+// Login goes through the email verification login flow and returns the token.
+func (h *Harness) Login(address string) string {
+	h.t.Helper()
+
+	firstName := "Test"
+	response := h.Do("POST", "/authentication/authenticate", map[string]any{
+		"email":      address,
+		"first_name": firstName,
+	}, "")
+	if response.Code != 200 {
+		h.t.Fatalf("authenticate %q: expected 200, got %d: %s", address, response.Code, response.Body)
+	}
+
+	sent := h.Emails.SentWithTemplate("authentication")
+	if len(sent) == 0 {
+		h.t.Fatalf("authenticate %q: no authentication email sent", address)
+	}
+	data, ok := sent[len(sent)-1].Data.(email.AuthenticationData)
+	if !ok {
+		h.t.Fatalf("authenticate %q: unexpected authentication email data %T", address, sent[len(sent)-1].Data)
+	}
+
+	response = h.Do("POST", "/authentication/verify-authentication", map[string]any{
+		"email": address,
+		"code":  data.Code,
+	}, "")
+	if response.Code != 200 {
+		h.t.Fatalf("verify authentication %q: expected 200, got %d: %s", address, response.Code, response.Body)
+	}
+
+	var body struct {
+		Token string `json:"token"`
+	}
+	response.JSON(h.t, &body)
+
+	return body.Token
 }

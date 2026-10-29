@@ -52,6 +52,7 @@ type Config struct {
 	RambleRepository                  dbmodel.RambleRepository
 	RambleRegistrationRepository      dbmodel.RambleRegistrationRepository
 	RambleRegistrationGroupRepository dbmodel.RambleRegistrationGroupRepository
+	ReservationRepository             dbmodel.ReservationRepository
 	GuideRepository                   dbmodel.GuideRepository
 	UserPermissionOverrideRepository  dbmodel.UserPermissionOverrideRepository
 	UserRepository                    dbmodel.UserRepository
@@ -162,6 +163,7 @@ func Build(constants Constants, databaseSession *gorm.DB, services Services) *Co
 	config.RambleRepository = dbmodel.NewRambleRepository(databaseSession)
 	config.RambleRegistrationRepository = dbmodel.NewRambleRegistrationRepository(databaseSession)
 	config.RambleRegistrationGroupRepository = dbmodel.NewRambleRegistrationGroupRepository(databaseSession)
+	config.ReservationRepository = dbmodel.NewReservationRepository(databaseSession)
 	config.GuideRepository = dbmodel.NewGuideRepository(databaseSession)
 	config.UserPermissionOverrideRepository = dbmodel.NewUserPermissionOverrideRepository(databaseSession)
 	config.UserRepository = dbmodel.NewUserRepository(databaseSession)

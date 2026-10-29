@@ -1,6 +1,7 @@
 package reservation
 
 import (
+	stderrors "errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -28,7 +29,7 @@ import (
 // @Failure 401 {object} errors.ErrResponse
 // @Failure 403 {object} errors.ErrResponse
 // @Failure 404 {object} errors.ErrResponse
-// @Failure 409 {object} errors.ErrResponse "not_enough_places, reservation_cancelled, ramble_cancelled or ramble_started"
+// @Failure 409 {object} errors.ErrResponse "not_enough_places, reservation_cancelled, ramble_cancelled or ramble_started; reservation_waiting_list, reservation_not_confirmed or missing_prices when the reservation changes while its payment is prepared"
 // @Router /reservations/{id}/participants [post]
 func (config *Config) AddParticipants(w http.ResponseWriter, r *http.Request) {
 	reservation, ok := config.reservationToModify(w, r, permissionsChangeParticipants)
@@ -136,7 +137,7 @@ func (config *Config) UpdateParticipant(w http.ResponseWriter, r *http.Request) 
 // @Failure 401 {object} errors.ErrResponse
 // @Failure 403 {object} errors.ErrResponse
 // @Failure 404 {object} errors.ErrResponse
-// @Failure 409 {object} errors.ErrResponse "missing_prices, reservation_waiting_list, reservation_cancelled, ramble_cancelled, confirmation_not_open, confirmation_deadline_passed or ramble_started"
+// @Failure 409 {object} errors.ErrResponse "missing_prices, reservation_waiting_list, reservation_cancelled, ramble_cancelled, confirmation_not_open, confirmation_deadline_passed, ramble_started, or reservation_not_confirmed when the reservation changes while its payment is prepared"
 // @Router /reservations/{id}/confirm [put]
 func (config *Config) Confirm(w http.ResponseWriter, r *http.Request) {
 	reservation, ok := config.bookerReservation(w, r)
@@ -280,9 +281,16 @@ func (config *Config) respondWithPayment(w http.ResponseWriter, r *http.Request,
 			Name:  strings.TrimSpace(firstName + " " + lastName),
 		})
 		if err != nil {
-			// The change is saved: the payment is made later, by confirming again.
-			log.Printf("Failed to prepare the payment of reservation %d: %v", id, err)
-			result.PaymentUnavailable = true
+			if notPayable := notPayableError(err); notPayable != nil {
+				// The reservation stopped being payable since it was read.
+				render.Render(w, r, renderError(notPayable))
+				return
+			}
+			if !stderrors.Is(err, payments.ErrNothingToPay) {
+				// The change is saved: the payment is made later, by confirming again.
+				log.Printf("Failed to prepare the payment of reservation %d: %v", id, err)
+				result.PaymentUnavailable = true
+			}
 		}
 
 		if reservation, err = config.ReservationRepository.FindByID(id); err != nil {
@@ -293,6 +301,27 @@ func (config *Config) respondWithPayment(w http.ResponseWriter, r *http.Request,
 
 	result.Reservation = reservation.ToModel()
 	render.JSON(w, r, result)
+}
+
+// notPayableError returns the business error telling why the payment service
+// found the reservation not payable, nil for another error or when there is
+// nothing to pay.
+func notPayableError(err error) error {
+	switch {
+	case stderrors.Is(err, payments.ErrReservationCancelled):
+		return errReservationCancelled()
+	case stderrors.Is(err, payments.ErrReservationWaitingList):
+		return errReservationWaitingList()
+	case stderrors.Is(err, payments.ErrReservationNotConfirmed):
+		return errReservationNotConfirmed()
+	case stderrors.Is(err, payments.ErrRambleCancelled):
+		return errRambleCancelled()
+	case stderrors.Is(err, payments.ErrRambleStarted):
+		return errRambleStarted()
+	case stderrors.Is(err, payments.ErrMissingPrices):
+		return errMissingPrices()
+	}
+	return nil
 }
 
 // respondModified renders the reservation as saved, sends the booker the

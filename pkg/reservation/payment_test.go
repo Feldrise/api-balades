@@ -10,6 +10,7 @@ import (
 	"feldrise.com/balade/database/dbmodel"
 	reservations "feldrise.com/balade/pkg/reservation"
 	"feldrise.com/balade/pkg/testharness"
+	"gorm.io/gorm"
 )
 
 func TestOnlyTheBookerOrAnAuthorizedStaffCanReadAPayment(t *testing.T) {
@@ -520,5 +521,50 @@ func TestRefundedPaymentWithoutTheAmountRefundedCountsAsEntirelyRefunded(t *test
 	h.Do(http.MethodGet, fmt.Sprintf("/reservations/%d", created.ID), nil, h.Login("alice@example.com")).JSON(t, &got)
 	if got.HasSuccessfulPayment || got.AmountPaid != 0 || got.AmountDue != 2500 {
 		t.Errorf("expected nothing kept and 25,00 € due, got paid %d, due %d, successful %v", got.AmountPaid, got.AmountDue, got.HasSuccessfulPayment)
+	}
+}
+
+func TestPaymentIsNotPreparedWhenTheReservationStopsBeingPayableDuringTheConfirmation(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func(tx *gorm.DB, created reservation, ramble *dbmodel.Ramble)
+		reason string
+	}{
+		{"reservation cancelled", func(tx *gorm.DB, created reservation, ramble *dbmodel.Ramble) {
+			tx.Exec("UPDATE reservations SET status = 'cancelled' WHERE id = ?", created.ID)
+		}, "reservation_cancelled"},
+		{"ramble cancelled", func(tx *gorm.DB, created reservation, ramble *dbmodel.Ramble) {
+			tx.Exec("UPDATE rambles SET is_cancelled = true WHERE id = ?", ramble.ID)
+		}, "ramble_cancelled"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := testharness.New(t)
+			ramble := h.CreateRamble(payingFamilyRamble())
+			created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+			token := h.Login("alice@example.com")
+			openConfirmation(h, ramble)
+			h.DB.Model(&dbmodel.Reservation{}).Where("id = ?", created.ID).Update("status", "confirmed")
+
+			// The change is being made while the confirmation decides the payment.
+			changing := h.DB.Begin()
+			if err := changing.Exec("SELECT id FROM reservations WHERE id = ? FOR UPDATE", created.ID).Error; err != nil {
+				t.Fatalf("locking the reservation: %v", err)
+			}
+			done := make(chan *testharness.Response)
+			go func() { done <- confirmReservation(h, created.ID, token) }()
+			waitForLockWait(t, h)
+			c.change(changing, created, ramble)
+			if err := changing.Commit().Error; err != nil {
+				t.Fatalf("committing the change: %v", err)
+			}
+
+			if reason := confirmationRefusal(t, <-done); reason != c.reason {
+				t.Errorf("expected reason %s, got %q", c.reason, reason)
+			}
+			if intents := h.Stripe.PaymentIntents(); len(intents) != 0 {
+				t.Errorf("expected no payment prepared, got %+v", intents)
+			}
+		})
 	}
 }

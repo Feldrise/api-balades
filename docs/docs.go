@@ -2038,7 +2038,7 @@ const docTemplate = `{
                         }
                     },
                     "409": {
-                        "description": "missing_prices, reservation_waiting_list, reservation_cancelled, ramble_cancelled, confirmation_not_open, confirmation_deadline_passed or ramble_started",
+                        "description": "missing_prices, reservation_waiting_list, reservation_cancelled, ramble_cancelled, confirmation_not_open, confirmation_deadline_passed, ramble_started, or reservation_not_confirmed when the reservation changes while its payment is prepared",
                         "schema": {
                             "$ref": "#/definitions/ErrResponse"
                         }
@@ -2109,7 +2109,7 @@ const docTemplate = `{
                         }
                     },
                     "409": {
-                        "description": "not_enough_places, reservation_cancelled, ramble_cancelled or ramble_started",
+                        "description": "not_enough_places, reservation_cancelled, ramble_cancelled or ramble_started; reservation_waiting_list, reservation_not_confirmed or missing_prices when the reservation changes while its payment is prepared",
                         "schema": {
                             "$ref": "#/definitions/ErrResponse"
                         }

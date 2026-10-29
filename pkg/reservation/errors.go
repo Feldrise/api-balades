@@ -76,6 +76,14 @@ func errReservationWaitingList() error {
 	}
 }
 
+func errReservationNotConfirmed() error {
+	return &businessError{
+		status:  http.StatusConflict,
+		reason:  "reservation_not_confirmed",
+		message: "the reservation is not confirmed",
+	}
+}
+
 func errMissingPrices() error {
 	return &businessError{
 		status:  http.StatusConflict,

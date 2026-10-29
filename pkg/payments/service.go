@@ -19,7 +19,8 @@ import (
 type PaymentService interface {
 	// CreatePaymentForReservation creates the payment of the amount due by the
 	// reservation, as it is once locked: the payments of a reservation are
-	// decided one at a time. It gives back the pending payment of the same
+	// decided one at a time. It fails with one of the errors above when the
+	// reservation, once locked, cannot be paid. It gives back the pending payment of the same
 	// amount, if any, rather than creating another one, and cancels the pending
 	// payments of other amounts.
 	CreatePaymentForReservation(reservation *dbmodel.Reservation, payerInfo PayerInfo) (*model.PaymentResponse, error)
@@ -33,6 +34,17 @@ type PaymentService interface {
 	GetPaymentByID(id uint) (*model.Payment, error)
 	VerifyWebhookAndProcess(payload []byte, signature string, guideID uint) error
 }
+
+// Errors telling why the reservation, as it is once locked, cannot be paid.
+var (
+	ErrReservationCancelled    = errors.New("the reservation is cancelled")
+	ErrReservationWaitingList  = errors.New("the reservation is in the waiting list")
+	ErrReservationNotConfirmed = errors.New("the reservation is not confirmed")
+	ErrRambleCancelled         = errors.New("the ramble is cancelled")
+	ErrRambleStarted           = errors.New("payment is closed once the ramble has started")
+	ErrMissingPrices           = errors.New("the price of every participant must be specified first")
+	ErrNothingToPay            = errors.New("nothing to pay for this reservation")
+)
 
 type PayerInfo struct {
 	Email string
@@ -78,18 +90,14 @@ func (s *paymentService) CreatePaymentForReservation(reservation *dbmodel.Reserv
 
 // createPayment gives the payment of the amount due by the reservation, locked.
 func (s *paymentService) createPayment(payments dbmodel.PaymentRepository, reservation *dbmodel.Reservation, payerInfo PayerInfo) (*model.PaymentResponse, error) {
+	if err := s.checkPayable(reservation); err != nil {
+		return nil, err
+	}
 	ramble := &reservation.Ramble
 	if !ramble.PaymentEnabled {
 		return nil, errors.New("payment is not enabled for this ramble")
 	}
-	if ramble.HasStarted(s.clock.Now()) {
-		return nil, errors.New("payment is closed once the ramble has started")
-	}
-
 	amountCents := reservation.AmountDue()
-	if amountCents <= 0 {
-		return nil, errors.New("nothing to pay for this reservation")
-	}
 
 	guide, err := s.getPaymentGuide(ramble)
 	if err != nil {
@@ -186,8 +194,7 @@ func (s *paymentService) CancelObsoletePayments(reservation *dbmodel.Reservation
 // that no longer match what it owes.
 func (s *paymentService) cancelObsoletePayments(payments dbmodel.PaymentRepository, reservation *dbmodel.Reservation) error {
 	amountDue := reservation.AmountDue()
-	payable := !reservation.DeletedAt.Valid && reservation.Status == dbmodel.ReservationStatusConfirmed &&
-		!reservation.HasMissingPrices() && !reservation.Ramble.IsCancelled && !reservation.Ramble.HasStarted(s.clock.Now())
+	payable := s.checkPayable(reservation) == nil
 
 	for i := range reservation.Payments {
 		open := &reservation.Payments[i]
@@ -218,6 +225,27 @@ func (s *paymentService) cancelObsoletePayments(payments dbmodel.PaymentReposito
 		if err := payments.UpdateStatus(open.ID, open.Status); err != nil {
 			return fmt.Errorf("failed to update payment: %w", err)
 		}
+	}
+	return nil
+}
+
+// checkPayable tells why the reservation, locked, cannot be paid, if it cannot.
+func (s *paymentService) checkPayable(reservation *dbmodel.Reservation) error {
+	switch {
+	case reservation.DeletedAt.Valid || reservation.Status == dbmodel.ReservationStatusCancelled:
+		return ErrReservationCancelled
+	case reservation.Status == dbmodel.ReservationStatusWaitingList:
+		return ErrReservationWaitingList
+	case reservation.Status != dbmodel.ReservationStatusConfirmed:
+		return ErrReservationNotConfirmed
+	case reservation.Ramble.IsCancelled:
+		return ErrRambleCancelled
+	case reservation.Ramble.HasStarted(s.clock.Now()):
+		return ErrRambleStarted
+	case reservation.HasMissingPrices():
+		return ErrMissingPrices
+	case reservation.AmountDue() <= 0:
+		return ErrNothingToPay
 	}
 	return nil
 }

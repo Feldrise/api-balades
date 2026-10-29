@@ -23,7 +23,7 @@ body:json {
 }
 
 docs {
-  Adds participants, all or none: refused with 409 not_enough_places when they do not fit in the places left, ramble_cancelled on a cancelled ramble, and ramble_started once the ramble has started. Participants added to a confirmed reservation are confirmed, and payment holds the complementary payment of their prices when online payment is enabled. When the payment cannot be prepared, the participants stay added and payment_unavailable is true: the complement is paid later through Confirm Reservation. Restricted to the booker, or staff with update:registration-details (or its :self variant on their rambles).
+  Adds participants, all or none: refused with 409 not_enough_places when they do not fit in the places left, ramble_cancelled on a cancelled ramble, and ramble_started once the ramble has started. Participants added to a confirmed reservation are confirmed, and payment holds the complementary payment of their prices when online payment is enabled. When the payment cannot be prepared, the participants stay added and payment_unavailable is true: the complement is paid later through Confirm Reservation. When the reservation or its ramble changes while the payment is prepared, no payment is made and the 409 tells why (reservation_cancelled, ramble_cancelled, reservation_not_confirmed...). Restricted to the booker, or staff with update:registration-details (or its :self variant on their rambles).
 }
 
 tests {

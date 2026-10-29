@@ -33,6 +33,11 @@ type PaymentService interface {
 	// the single one it may still pay (payable, of the amount due, to the guide
 	// of the ramble), so that the others cannot be paid.
 	CancelObsoletePayments(reservation *dbmodel.Reservation) error
+	// ReconcileObsoletePayments is CancelObsoletePayments for a reconciliation
+	// in the background: it skips the reservation while an operation of the
+	// user holds it, and gives up early on a slow Stripe, so that it never
+	// makes the user wait. The next reconciliation catches up.
+	ReconcileObsoletePayments(reservation *dbmodel.Reservation) error
 	ProcessPaymentSuccess(paymentIntentID string) error
 	ProcessPaymentFailure(paymentIntentID string, failureReason ...string) error
 	RefundPayment(paymentID uint, amount *int64, reason *string) error
@@ -195,13 +200,21 @@ func paymentIdempotencyKey(reservationID uint, paymentNumber int, amount int64, 
 }
 
 func (s *paymentService) CancelObsoletePayments(reservation *dbmodel.Reservation) error {
-	return s.paymentRepo.ForReservation(reservation.ID, func(ctx context.Context, payments dbmodel.PaymentRepository, locked *dbmodel.Reservation) error {
-		guide, err := s.payableTo(locked)
-		if err != nil {
-			return err
-		}
-		return s.cancelObsoletePayments(ctx, payments, locked, guide)
-	})
+	return s.paymentRepo.ForReservation(reservation.ID, s.cancelUnpayablePayments)
+}
+
+func (s *paymentService) ReconcileObsoletePayments(reservation *dbmodel.Reservation) error {
+	return s.paymentRepo.ForIdleReservation(reservation.ID, s.cancelUnpayablePayments)
+}
+
+// cancelUnpayablePayments cancels every open payment of the reservation,
+// locked, but the one it may still pay (see keptPayment).
+func (s *paymentService) cancelUnpayablePayments(ctx context.Context, payments dbmodel.PaymentRepository, reservation *dbmodel.Reservation) error {
+	guide, err := s.payableTo(reservation)
+	if err != nil {
+		return err
+	}
+	return s.cancelObsoletePayments(ctx, payments, reservation, guide)
 }
 
 // payableTo returns the guide the reservation, locked, pays what it owes to,

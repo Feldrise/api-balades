@@ -84,10 +84,11 @@ func (config *Config) CancelUnconfirmedReservations(now time.Time) error {
 }
 
 // ReconcileOpenPayments cancels the open payments that the reservation can no
-// longer pay (see payments.PaymentService.CancelObsoletePayments): of a
+// longer pay (see payments.PaymentService.ReconcileObsoletePayments): of a
 // reservation cancelled or deleted, of a ramble cancelled or started, of a
 // former amount due or guide. It catches up on the cancellations on Stripe
-// that failed at the time.
+// that failed at the time. A reservation held by an operation of the user, or
+// whose cancellation Stripe is slow to answer, is reconciled at the next pass.
 func (config *Config) ReconcileOpenPayments() error {
 	reservations, err := config.ReservationRepository.FindWithOpenPayments()
 	if err != nil {
@@ -95,7 +96,9 @@ func (config *Config) ReconcileOpenPayments() error {
 	}
 
 	for i := range reservations {
-		config.cancelObsoletePayments(&reservations[i])
+		if err := config.PaymentService.ReconcileObsoletePayments(&reservations[i]); err != nil {
+			log.Printf("Failed to reconcile the open payments of reservation %d, retrying at the next pass: %v", reservations[i].ID, err)
+		}
 	}
 	return nil
 }

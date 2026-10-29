@@ -16,10 +16,17 @@ import (
 type PaymentTimeouts struct {
 	// Decision bounds the transaction of a decision (ForReservation, ForPayment).
 	Decision time.Duration
+	// Reconciliation bounds the transaction of a reconciliation in the
+	// background (ForIdleReservation).
+	Reconciliation time.Duration
 }
 
-// defaultPaymentDecisionTimeout is the default PaymentTimeouts.Decision.
-const defaultPaymentDecisionTimeout = 30 * time.Second
+// Default PaymentTimeouts. A reconciliation holds the reservation for less
+// time than an operation on the places of the ramble waits for it.
+const (
+	defaultPaymentDecisionTimeout       = 30 * time.Second
+	defaultPaymentReconciliationTimeout = 3 * time.Second
+)
 
 // decisionContext is the context of the external calls made by a decision
 // bounded by timeout: it ends before the transaction, with a sixth of timeout
@@ -172,6 +179,11 @@ type PaymentRepository interface {
 	// its payments only. decide makes its calls to Stripe with ctx, which ends
 	// before the transaction.
 	ForReservation(reservationID uint, decide func(ctx context.Context, payments PaymentRepository, reservation *Reservation) error) error
+	// ForIdleReservation is ForReservation for a reconciliation in the
+	// background, which never makes an operation of the user wait: it skips the
+	// reservation, without running decide, while another operation holds it,
+	// and its transaction is bounded by PaymentTimeouts.Reconciliation.
+	ForIdleReservation(reservationID uint, decide func(ctx context.Context, payments PaymentRepository, reservation *Reservation) error) error
 	// ForPayment locks the payment and runs decide in a transaction with the
 	// payment as it is once locked, with its Guide, and a repository bound to
 	// the transaction. The refunds of a payment are so decided one at a time.
@@ -188,6 +200,9 @@ type paymentRepository struct {
 func NewPaymentRepository(db *gorm.DB, timeouts PaymentTimeouts) PaymentRepository {
 	if timeouts.Decision == 0 {
 		timeouts.Decision = defaultPaymentDecisionTimeout
+	}
+	if timeouts.Reconciliation == 0 {
+		timeouts.Reconciliation = defaultPaymentReconciliationTimeout
 	}
 	return &paymentRepository{db: db, timeouts: timeouts}
 }
@@ -405,14 +420,33 @@ func (r *paymentRepository) GetTotalAmountByGuide(guideID uint, status string) (
 }
 
 func (r *paymentRepository) ForReservation(reservationID uint, decide func(ctx context.Context, payments PaymentRepository, reservation *Reservation) error) error {
-	ctx, cancel := context.WithTimeout(context.Background(), r.timeouts.Decision)
+	return r.forReservation(reservationID, r.timeouts.Decision, false, decide)
+}
+
+func (r *paymentRepository) ForIdleReservation(reservationID uint, decide func(ctx context.Context, payments PaymentRepository, reservation *Reservation) error) error {
+	return r.forReservation(reservationID, r.timeouts.Reconciliation, true, decide)
+}
+
+// forReservation locks the reservation, unless skipBusy and another
+// transaction holds it, and runs decide in a transaction bounded by timeout.
+func (r *paymentRepository) forReservation(reservationID uint, timeout time.Duration, skipBusy bool, decide func(ctx context.Context, payments PaymentRepository, reservation *Reservation) error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	callCtx, cancelCalls := decisionContext(ctx, r.timeouts.Decision)
+	callCtx, cancelCalls := decisionContext(ctx, timeout)
 	defer cancelCalls()
+
+	locking := clause.Locking{Strength: "UPDATE"}
+	if skipBusy {
+		locking.Options = "SKIP LOCKED"
+	}
 
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var reservation Reservation
-		if err := tx.Unscoped().Clauses(clause.Locking{Strength: "UPDATE"}).First(&reservation, reservationID).Error; err != nil {
+		err := tx.Unscoped().Clauses(locking).First(&reservation, reservationID).Error
+		if skipBusy && errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
 			return err
 		}
 

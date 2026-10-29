@@ -120,6 +120,7 @@ type FakeStripeService struct {
 	cancelFailing  bool
 	creationDelay  time.Duration
 	refundDelay    time.Duration
+	cancelDelay    time.Duration
 }
 
 // SetCancellationFailing makes the cancellation of payment intents fail, as
@@ -148,6 +149,16 @@ func (s *FakeStripeService) SetRefundDelay(delay time.Duration) {
 	defer s.mu.Unlock()
 
 	s.refundDelay = delay
+}
+
+// SetCancellationDelay makes the cancellation of payment intents take delay,
+// as a slow network does. A cancellation whose context ends first fails, but
+// is made all the same, as Stripe does once it received the request.
+func (s *FakeStripeService) SetCancellationDelay(delay time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.cancelDelay = delay
 }
 
 // SetUnavailable makes the creation of payment intents fail, as when Stripe is unreachable.
@@ -257,16 +268,19 @@ func (s *FakeStripeService) RetrievePaymentIntent(ctx context.Context, credentia
 // when it is cancelled already.
 func (s *FakeStripeService) CancelPaymentIntent(ctx context.Context, credentials stripe.GuideStripeCredentials, paymentIntentID string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if s.cancelFailing {
+		s.mu.Unlock()
 		return errors.New("stripe is unavailable")
 	}
 	if slices.Contains(s.cancelled, paymentIntentID) {
+		s.mu.Unlock()
 		return fmt.Errorf("payment intent %q is cancelled already", paymentIntentID)
 	}
 	s.cancelled = append(s.cancelled, paymentIntentID)
-	return nil
+	delay := s.cancelDelay
+	s.mu.Unlock()
+
+	return respond(ctx, delay)
 }
 
 func (s *FakeStripeService) RefundPayment(ctx context.Context, credentials stripe.GuideStripeCredentials, paymentIntentID string, amount int64, idempotencyKey string) (int64, error) {

@@ -3,6 +3,7 @@ package reservation_test
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -806,5 +807,80 @@ func TestARefundNotRecordedIsCaughtUpByTheNextOne(t *testing.T) {
 	h.Do(http.MethodGet, fmt.Sprintf("/reservations/%d", created.ID), nil, h.Login("alice@example.com")).JSON(t, &got)
 	if p := got.Payments[0]; p.Status != "partially_refunded" || p.RefundAmount == nil || *p.RefundAmount != 2500 {
 		t.Errorf("expected the 25,00 € refunded on Stripe recorded, got %+v", p)
+	}
+}
+
+// startedRambleWithOpenPayments returns the open payments of two reservations,
+// of alice then bob, on a ramble started since.
+func startedRambleWithOpenPayments(t *testing.T, h *testharness.Harness) (alice, bob reservation, aliceIntent, bobIntent string) {
+	t.Helper()
+	ramble := h.CreateRamble(payingFamilyRamble())
+	alice = reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	bob = reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "bob@example.com", Participants: people(1, "Adulte")})
+	openConfirmation(h, ramble)
+	confirmReservation(h, alice.ID, h.Login("alice@example.com"))
+	confirmReservation(h, bob.ID, h.Login("bob@example.com"))
+	intents := h.Stripe.PaymentIntents()
+	if len(intents) != 2 {
+		t.Fatalf("expected a payment for each reservation, got %+v", intents)
+	}
+	h.Clock.Set(ramble.Date.Add(time.Minute))
+	return alice, bob, intents[0].ID, intents[1].ID
+}
+
+func TestReconciliationSkipsAReservationLockedByAnotherOperation(t *testing.T) {
+	h := testharness.New(t)
+	busy, _, busyIntent, idleIntent := startedRambleWithOpenPayments(t, h)
+
+	lock := h.DB.Begin()
+	defer lock.Rollback()
+	if err := lock.Exec("SELECT id FROM reservations WHERE id = ? FOR UPDATE", busy.ID).Error; err != nil {
+		t.Fatalf("locking the reservation: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- reservations.New(h.Config).ReconcileOpenPayments() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("reconciling the open payments: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		lock.Rollback()
+		<-done
+		t.Fatalf("expected the reconciliation not to wait for the reservation locked by another operation")
+	}
+	if cancelled := h.Stripe.CancelledPaymentIntents(); len(cancelled) != 1 || cancelled[0] != idleIntent {
+		t.Errorf("expected only the payment of the idle reservation cancelled, got %v", cancelled)
+	}
+
+	lock.Rollback()
+	if err := reservations.New(h.Config).ReconcileOpenPayments(); err != nil {
+		t.Fatalf("reconciling the open payments again: %v", err)
+	}
+	if cancelled := h.Stripe.CancelledPaymentIntents(); !slices.Contains(cancelled, busyIntent) {
+		t.Errorf("expected the payment of the reservation released cancelled at the next pass, got %v", cancelled)
+	}
+}
+
+func TestReconciliationGivesUpOnASlowStripeWithoutHoldingTheReservation(t *testing.T) {
+	h := testharness.New(t, testharness.WithPaymentTimeouts(dbmodel.PaymentTimeouts{Reconciliation: 600 * time.Millisecond}))
+	alice, _, _, _ := startedRambleWithOpenPayments(t, h)
+
+	h.Stripe.SetCancellationDelay(3 * time.Second)
+	started := time.Now()
+	if err := reservations.New(h.Config).ReconcileOpenPayments(); err != nil {
+		t.Fatalf("reconciling the open payments: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed >= 2*time.Second {
+		t.Errorf("expected the reconciliation to give up on the slow Stripe, it took %v", elapsed)
+	}
+
+	h.Stripe.SetCancellationDelay(0)
+	if err := reservations.New(h.Config).ReconcileOpenPayments(); err != nil {
+		t.Fatalf("reconciling the open payments again: %v", err)
+	}
+	if got := getReservation(t, h, alice.ID, h.Login("alice@example.com")); len(got.Payments) != 1 || got.Payments[0].Status != "cancelled" {
+		t.Errorf("expected the payment cancelled on Stripe recorded cancelled at the next pass, got %+v", got.Payments)
 	}
 }

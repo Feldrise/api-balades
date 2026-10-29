@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -161,6 +162,10 @@ func (s *FakeStripeService) CreatePaymentIntent(credentials stripe.GuideStripeCr
 
 	for _, intent := range s.paymentIntents {
 		if idempotencyKey != "" && intent.IdempotencyKey == idempotencyKey {
+			// Stripe refuses to reuse a key with other parameters.
+			if intent.Amount != amount || intent.Currency != currency || !maps.Equal(intent.Metadata, metadata) {
+				return nil, fmt.Errorf("idempotency key %q already used with other parameters", idempotencyKey)
+			}
 			return &stripego.PaymentIntent{
 				ID:           intent.ID,
 				Amount:       intent.Amount,

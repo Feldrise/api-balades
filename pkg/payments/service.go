@@ -1,9 +1,12 @@
 package payments
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -152,10 +155,7 @@ func (s *paymentService) createPayment(payments dbmodel.PaymentRepository, reser
 		"payer_name":     payerInfo.Name,
 	}
 
-	// The key changes with every payment recorded and with the amount due, so
-	// that a retry after a failure to record the payment gives back the same
-	// payment intent, and a new amount due a new one.
-	idempotencyKey := fmt.Sprintf("reservation-%d-payment-%d-amount-%d", reservationID, len(reservation.Payments)+1, amountCents)
+	idempotencyKey := paymentIdempotencyKey(reservationID, len(reservation.Payments)+1, amountCents, "eur", metadata)
 	paymentIntent, err := s.stripeService.CreatePaymentIntent(credentials, amountCents, "eur", metadata, idempotencyKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create payment intent: %w", err)
@@ -182,6 +182,20 @@ func (s *paymentService) createPayment(payments dbmodel.PaymentRepository, reser
 		ClientSecret:   paymentIntent.ClientSecret,
 		PublishableKey: *guide.StripePublicKey,
 	}, nil
+}
+
+// paymentIdempotencyKey is the idempotency key of the creation of a payment
+// intent. It changes with every payment recorded and with the parameters sent,
+// so that a retry after a failure to record the payment gives back the same
+// payment intent, and other parameters (amount due, payer...) a new one:
+// Stripe refuses a key reused with other parameters.
+func paymentIdempotencyKey(reservationID uint, paymentNumber int, amount int64, currency string, metadata map[string]string) string {
+	hash := sha256.New()
+	fmt.Fprintf(hash, "amount=%d\ncurrency=%s\n", amount, currency)
+	for _, key := range slices.Sorted(maps.Keys(metadata)) {
+		fmt.Fprintf(hash, "metadata[%q]=%q\n", key, metadata[key])
+	}
+	return fmt.Sprintf("reservation-%d-payment-%d-%x", reservationID, paymentNumber, hash.Sum(nil))
 }
 
 func (s *paymentService) CancelObsoletePayments(reservation *dbmodel.Reservation) error {

@@ -608,3 +608,30 @@ func TestSchedulerCancelsTheOpenPaymentsLeftByACancellationOrADeletion(t *testin
 		})
 	}
 }
+
+func TestPaymentNotRecordedIsPreparedAgainAfterTheBookerNameChanges(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	participants := people(2, "Adulte")
+	participants[0].IsBooker = true
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: participants})
+	token := h.Login("alice@example.com")
+	openConfirmation(h, ramble)
+	confirmReservation(h, created.ID, token)
+	// As if the payment created on Stripe had failed to be recorded.
+	h.DB.Unscoped().Where("reservation_id = ?", created.ID).Delete(&dbmodel.Payment{})
+
+	booker := created.Participants[0]
+	if response := updateParticipant(h, created.ID, booker.ID, participantUpdatePayload{FirstName: "Alicia", LastName: booker.LastName, PriceLabel: "Adulte"}, token); response.Code != http.StatusOK {
+		t.Fatalf("renaming the booker: expected 200, got %d: %s", response.Code, response.Body)
+	}
+
+	var again struct {
+		reservationWithPayment
+		PaymentUnavailable bool `json:"payment_unavailable"`
+	}
+	confirmReservation(h, created.ID, token).JSON(t, &again)
+	if again.PaymentUnavailable || again.Payment == nil || again.Payment.Payment.Amount != 2500 {
+		t.Errorf("expected the payment of 25,00 € prepared, got %+v, unavailable %v", again.Payment, again.PaymentUnavailable)
+	}
+}

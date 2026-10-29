@@ -1,42 +1,36 @@
 basePath: /api/v1
 definitions:
-  AdminRegistrationListResponse:
+  AdminParticipantUpdatePayload:
+    properties:
+      first_name:
+        type: string
+      last_name:
+        type: string
+      price_label:
+        type: string
+    type: object
+  AdminReservationListResponse:
     properties:
       page:
         type: integer
       per_page:
         type: integer
-      registrations:
+      reservations:
         items:
-          $ref: '#/definitions/RambleRegistration'
+          $ref: '#/definitions/Reservation'
         type: array
       total:
         type: integer
       total_pages:
         type: integer
     type: object
-  AdminRegistrationStatusUpdatePayload:
+  AdminReservationStatusUpdatePayload:
     properties:
       reason:
         type: string
       send_email:
-        description: Whether to send notification email
+        description: Whether to send the reservation summary to the booker
         type: boolean
-      status:
-        type: string
-    type: object
-  AdminRegistrationUpdatePayload:
-    properties:
-      email:
-        type: string
-      first_name:
-        type: string
-      last_name:
-        type: string
-      notes:
-        type: string
-      phone:
-        type: string
       status:
         type: string
     type: object
@@ -61,18 +55,33 @@ definitions:
     required:
     - email
     type: object
-  BulkActionError:
+  BulkReservationActionError:
     properties:
       error:
         type: string
-      registration_id:
+      reservation_id:
         type: integer
     type: object
-  BulkActionResult:
+  BulkReservationActionPayload:
+    properties:
+      action:
+        description: '"confirm", "cancel", "move_to_waiting", "delete"'
+        type: string
+      reason:
+        type: string
+      reservation_ids:
+        items:
+          type: integer
+        type: array
+      send_email:
+        description: Whether to send the reservation summary to the bookers
+        type: boolean
+    type: object
+  BulkReservationActionResult:
     properties:
       errors:
         items:
-          $ref: '#/definitions/BulkActionError'
+          $ref: '#/definitions/BulkReservationActionError'
         type: array
       failure_count:
         type: integer
@@ -80,23 +89,8 @@ definitions:
         type: integer
       updated:
         items:
-          $ref: '#/definitions/RambleRegistration'
+          $ref: '#/definitions/Reservation'
         type: array
-    type: object
-  BulkRegistrationActionPayload:
-    properties:
-      action:
-        description: '"confirm", "cancel", "move_to_waiting", "delete"'
-        type: string
-      reason:
-        type: string
-      registration_ids:
-        items:
-          type: integer
-        type: array
-      send_email:
-        description: Whether to send notification emails
-        type: boolean
     type: object
   ErrResponse:
     properties:
@@ -229,17 +223,6 @@ definitions:
           unknown, as for participants migrated from a ramble with several prices.
         type: boolean
     type: object
-  ParticipantInfo:
-    properties:
-      email:
-        type: string
-      first_name:
-        type: string
-      last_name:
-        type: string
-      phone:
-        type: string
-    type: object
   ParticipantPayload:
     properties:
       first_name:
@@ -280,12 +263,12 @@ definitions:
       failure_reason:
         description: Reason for payment failure
         type: string
-      group:
-        $ref: '#/definitions/RambleRegistrationGroup'
       group_id:
         type: integer
       guide:
-        $ref: '#/definitions/Guide'
+        allOf:
+        - $ref: '#/definitions/Guide'
+        description: Foreign Objects
       guide_id:
         description: Guide receiving payment
         type: integer
@@ -307,10 +290,6 @@ definitions:
         type: integer
       refunded_at:
         type: string
-      registration:
-        allOf:
-        - $ref: '#/definitions/RambleRegistration'
-        description: Foreign Objects
       registration_id:
         description: Legacy registration relationship
         type: integer
@@ -327,31 +306,6 @@ definitions:
         type: string
       updated_at:
         type: string
-    type: object
-  PaymentCreatePayload:
-    properties:
-      group_id:
-        type: integer
-      payer_email:
-        type: string
-      payer_name:
-        type: string
-      price_label:
-        description: 'Deprecated: use PriceSelections for groups'
-        type: string
-      price_selections:
-        description: For group payments with multiple prices
-        items:
-          $ref: '#/definitions/PriceSelection'
-        type: array
-      registration_id:
-        type: integer
-      return_url:
-        type: string
-    required:
-    - payer_email
-    - payer_name
-    - return_url
     type: object
   PaymentRefundPayload:
     properties:
@@ -372,17 +326,6 @@ definitions:
       publishable_key:
         description: Stripe publishable key for frontend
         type: string
-    type: object
-  PriceSelection:
-    properties:
-      price_label:
-        type: string
-      quantity:
-        minimum: 1
-        type: integer
-    required:
-    - price_label
-    - quantity
     type: object
   Ramble:
     properties:
@@ -530,105 +473,6 @@ definitions:
       title:
         type: string
     type: object
-  RambleRegistration:
-    properties:
-      cancellation_date:
-        type: string
-      cancellation_reason:
-        type: string
-      confirmation_date:
-        type: string
-      confirmation_deadline:
-        type: string
-      created_at:
-        type: string
-      email:
-        type: string
-      first_name:
-        type: string
-      group_id:
-        type: integer
-      id:
-        type: integer
-      last_name:
-        type: string
-      phone:
-        type: string
-      ramble:
-        $ref: '#/definitions/RambleRegistrationSummary'
-      ramble_id:
-        type: integer
-      registration_date:
-        type: string
-      status:
-        type: string
-      updated_at:
-        type: string
-      user_id:
-        type: integer
-    type: object
-  RambleRegistrationCancelPayload:
-    properties:
-      reason:
-        type: string
-    type: object
-  RambleRegistrationConfirmPayload:
-    properties:
-      confirmed:
-        type: boolean
-    type: object
-  RambleRegistrationCreatePayload:
-    properties:
-      participants:
-        items:
-          $ref: '#/definitions/ParticipantInfo'
-        type: array
-      primary_email:
-        description: Optional for single registration
-        type: string
-      ramble_id:
-        type: integer
-    type: object
-  RambleRegistrationGroup:
-    properties:
-      cancellation_date:
-        type: string
-      cancellation_reason:
-        type: string
-      confirmation_date:
-        type: string
-      confirmation_deadline:
-        type: string
-      created_at:
-        type: string
-      id:
-        type: integer
-      participant_count:
-        type: integer
-      primary_email:
-        type: string
-      ramble_id:
-        type: integer
-      registration_date:
-        type: string
-      registrations:
-        items:
-          $ref: '#/definitions/RambleRegistration'
-        type: array
-      status:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  RambleRegistrationSummary:
-    properties:
-      date:
-        type: string
-      location:
-        type: string
-      title:
-        type: string
-    type: object
   Reservation:
     properties:
       cancellation_date:
@@ -668,7 +512,7 @@ definitions:
           $ref: '#/definitions/ReservationPayment'
         type: array
       ramble:
-        $ref: '#/definitions/RambleRegistrationSummary'
+        $ref: '#/definitions/ReservationRamble'
       ramble_id:
         type: integer
       status:
@@ -713,6 +557,15 @@ definitions:
         description: pending, succeeded, failed, cancelled, refunded
         type: string
     type: object
+  ReservationRamble:
+    properties:
+      date:
+        type: string
+      location:
+        type: string
+      title:
+        type: string
+    type: object
   ReservationWithPayment:
     properties:
       cancellation_date:
@@ -754,7 +607,7 @@ definitions:
           $ref: '#/definitions/ReservationPayment'
         type: array
       ramble:
-        $ref: '#/definitions/RambleRegistrationSummary'
+        $ref: '#/definitions/ReservationRamble'
       ramble_id:
         type: integer
       status:
@@ -1004,35 +857,6 @@ paths:
       summary: Verify the authentication code
       tags:
       - autentication
-  /groups/{group_id}/payments:
-    get:
-      description: Get all payments associated with a group
-      parameters:
-      - description: Group ID
-        in: path
-        name: group_id
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/Payment'
-            type: array
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/ErrResponse'
-      summary: Get payments for group
-      tags:
-      - payments
   /guides:
     get:
       description: Get all guides with optional active filter
@@ -1382,36 +1206,6 @@ paths:
           schema:
             type: string
       summary: Update payment configuration for the current guide
-  /payments:
-    post:
-      consumes:
-      - application/json
-      description: Create a new payment intent for a registration or group
-      parameters:
-      - description: Payment creation payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/PaymentCreatePayload'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/PaymentResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/ErrResponse'
-      summary: Create payment intent
-      tags:
-      - payments
   /payments/{id}:
     get:
       description: Get payment details by ID
@@ -1797,480 +1591,6 @@ paths:
           schema:
             type: string
       summary: Duplicate a ramble
-  /registrations:
-    get:
-      description: Get all registrations for the authenticated user
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/RambleRegistration'
-            type: array
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/ErrResponse'
-      summary: Get user's registrations
-      tags:
-      - registrations
-    post:
-      consumes:
-      - application/json
-      description: Register user(s) for a ramble. Supports both single and group registrations.
-        If ramble is full, users are added to waiting list.
-      parameters:
-      - description: Registration data
-        in: body
-        name: registration
-        required: true
-        schema:
-          $ref: '#/definitions/RambleRegistrationCreatePayload'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/RambleRegistration'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/ErrResponse'
-      summary: Create a new ramble registration
-      tags:
-      - registrations
-  /registrations/{id}:
-    get:
-      description: Get details of a specific registration
-      parameters:
-      - description: Registration ID
-        in: path
-        name: id
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/RambleRegistration'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/ErrResponse'
-      summary: Get a registration by ID
-      tags:
-      - registrations
-  /registrations/{id}/cancel:
-    put:
-      consumes:
-      - application/json
-      description: Cancel a user's registration for a ramble
-      parameters:
-      - description: Registration ID
-        in: path
-        name: id
-        required: true
-        type: integer
-      - description: Cancellation data
-        in: body
-        name: cancellation
-        required: true
-        schema:
-          $ref: '#/definitions/RambleRegistrationCancelPayload'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/RambleRegistration'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/ErrResponse'
-      summary: Cancel a registration
-      tags:
-      - registrations
-  /registrations/{id}/confirm:
-    put:
-      consumes:
-      - application/json
-      description: Confirm or deny participation in a ramble
-      parameters:
-      - description: Registration ID
-        in: path
-        name: id
-        required: true
-        type: integer
-      - description: Confirmation data
-        in: body
-        name: confirmation
-        required: true
-        schema:
-          $ref: '#/definitions/RambleRegistrationConfirmPayload'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/RambleRegistration'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/ErrResponse'
-      summary: Confirm a registration
-      tags:
-      - registrations
-  /registrations/{registration_id}/payments:
-    get:
-      description: Get all payments associated with a registration
-      parameters:
-      - description: Registration ID
-        in: path
-        name: registration_id
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/Payment'
-            type: array
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/ErrResponse'
-      summary: Get payments for registration
-      tags:
-      - payments
-  /registrations/admin:
-    get:
-      consumes:
-      - application/json
-      description: Get all registrations with advanced filtering and pagination (admin
-        only)
-      parameters:
-      - description: YYYY-MM-DD format
-        in: query
-        name: date_from
-        type: string
-      - description: YYYY-MM-DD format
-        in: query
-        name: date_to
-        type: string
-      - in: query
-        name: email
-        type: string
-      - in: query
-        name: page
-        type: integer
-      - in: query
-        name: per_page
-        type: integer
-      - in: query
-        name: ramble_id
-        type: integer
-      - in: query
-        name: ramble_title
-        type: string
-      - in: query
-        name: search
-        type: string
-      - in: query
-        name: sort_by
-        type: string
-      - in: query
-        name: sort_order
-        type: string
-      - in: query
-        name: status
-        type: string
-      - collectionFormat: csv
-        in: query
-        items:
-          type: string
-        name: statuses
-        type: array
-      - in: query
-        name: user_id
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/AdminRegistrationListResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/ErrResponse'
-      summary: Get all registrations (admin)
-      tags:
-      - admin
-      - registrations
-  /registrations/admin/{id}:
-    delete:
-      description: Delete a registration (admin only)
-      parameters:
-      - description: Registration ID
-        in: path
-        name: id
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/ErrResponse'
-      summary: Delete registration (admin)
-      tags:
-      - admin
-      - registrations
-    put:
-      consumes:
-      - application/json
-      description: Update registration details like name, email, phone (admin only)
-      parameters:
-      - description: Registration ID
-        in: path
-        name: id
-        required: true
-        type: integer
-      - description: Update data
-        in: body
-        name: update
-        required: true
-        schema:
-          $ref: '#/definitions/AdminRegistrationUpdatePayload'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/RambleRegistration'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/ErrResponse'
-      summary: Update registration details (admin)
-      tags:
-      - admin
-      - registrations
-  /registrations/admin/{id}/status:
-    put:
-      consumes:
-      - application/json
-      description: Update registration status with optional reason (admin only)
-      parameters:
-      - description: Registration ID
-        in: path
-        name: id
-        required: true
-        type: integer
-      - description: Status update data
-        in: body
-        name: status
-        required: true
-        schema:
-          $ref: '#/definitions/AdminRegistrationStatusUpdatePayload'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/RambleRegistration'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/ErrResponse'
-      summary: Update registration status (admin)
-      tags:
-      - admin
-      - registrations
-  /registrations/admin/bulk-action:
-    post:
-      consumes:
-      - application/json
-      description: Perform bulk actions on multiple registrations (admin only)
-      parameters:
-      - description: Bulk action data
-        in: body
-        name: bulk
-        required: true
-        schema:
-          $ref: '#/definitions/BulkRegistrationActionPayload'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/BulkActionResult'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/ErrResponse'
-      summary: Bulk action on registrations (admin)
-      tags:
-      - admin
-      - registrations
-  /registrations/ramble/{rambleId}:
-    get:
-      description: Get all registrations for a specific ramble (admin only)
-      parameters:
-      - description: Ramble ID
-        in: path
-        name: rambleId
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/RambleRegistration'
-            type: array
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/ErrResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/ErrResponse'
-      summary: Get ramble registrations
-      tags:
-      - registrations
   /reservations:
     get:
       description: Get the reservations of the authenticated booker, with participants,
@@ -2583,5 +1903,277 @@ paths:
             $ref: '#/definitions/ErrResponse'
       summary: Update a participant of a reservation
       tags:
+      - reservations
+  /reservations/admin:
+    get:
+      description: Get the reservations with their participants, with filtering and
+        pagination (admin or guide)
+      parameters:
+      - description: Ramble ID
+        in: query
+        name: ramble_id
+        type: integer
+      - description: Exact contact email
+        in: query
+        name: email
+        type: string
+      - description: Contact email or participant name
+        in: query
+        name: search
+        type: string
+      - description: Part of the ramble title
+        in: query
+        name: ramble_title
+        type: string
+      - description: 'Status: pending, confirmed, waiting_list or cancelled'
+        in: query
+        name: status
+        type: string
+      - collectionFormat: csv
+        description: Several statuses
+        in: query
+        items:
+          type: string
+        name: statuses
+        type: array
+      - description: Booker account ID
+        in: query
+        name: user_id
+        type: integer
+      - description: Created since this date (YYYY-MM-DD)
+        in: query
+        name: date_from
+        type: string
+      - description: Created until this date included (YYYY-MM-DD)
+        in: query
+        name: date_to
+        type: string
+      - description: created_at (default), contact_email or status
+        in: query
+        name: sort_by
+        type: string
+      - description: asc or desc (default)
+        in: query
+        name: sort_order
+        type: string
+      - description: Page, from 1
+        in: query
+        name: page
+        type: integer
+      - description: Reservations per page, 50 by default
+        in: query
+        name: per_page
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/AdminReservationListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Get all reservations (admin)
+      tags:
+      - admin
+      - reservations
+  /reservations/admin/{id}:
+    delete:
+      description: Delete a reservation with its participants. The places it held
+        go to the waiting list.
+      parameters:
+      - description: Reservation ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Delete a reservation (admin)
+      tags:
+      - admin
+      - reservations
+  /reservations/admin/{id}/participants/{participantId}:
+    put:
+      consumes:
+      - application/json
+      description: Change the name or the price of a participant, to correct an error.
+        The omitted fields are kept. Once the reservation is paid, the price is frozen
+        but the name can still be corrected.
+      parameters:
+      - description: Reservation ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Participant ID
+        in: path
+        name: participantId
+        required: true
+        type: integer
+      - description: Participant data
+        in: body
+        name: participant
+        required: true
+        schema:
+          $ref: '#/definitions/AdminParticipantUpdatePayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Reservation'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "409":
+          description: reservation_paid or reservation_cancelled
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Update a participant of a reservation (admin)
+      tags:
+      - admin
+      - reservations
+  /reservations/admin/{id}/status:
+    put:
+      consumes:
+      - application/json
+      description: Set the status of a reservation, as a whole. A reservation put
+        back in pending, confirmed or waiting list from a status that holds no place
+        must fit entirely in the places left. The places released go to the waiting
+        list.
+      parameters:
+      - description: Reservation ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Status update data
+        in: body
+        name: status
+        required: true
+        schema:
+          $ref: '#/definitions/AdminReservationStatusUpdatePayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Reservation'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "409":
+          description: not_enough_places
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Update reservation status (admin)
+      tags:
+      - admin
+      - reservations
+  /reservations/admin/bulk-action:
+    post:
+      consumes:
+      - application/json
+      description: Confirm, cancel, move to waiting list or delete several reservations.
+        Each one follows the rules of the single actions, and fails separately.
+      parameters:
+      - description: Bulk action data
+        in: body
+        name: bulk
+        required: true
+        schema:
+          $ref: '#/definitions/BulkReservationActionPayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/BulkReservationActionResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Bulk action on reservations (admin)
+      tags:
+      - admin
       - reservations
 swagger: "2.0"

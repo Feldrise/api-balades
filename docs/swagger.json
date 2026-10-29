@@ -273,50 +273,6 @@
                 }
             }
         },
-        "/groups/{group_id}/payments": {
-            "get": {
-                "description": "Get all payments associated with a group",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "payments"
-                ],
-                "summary": "Get payments for group",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "Group ID",
-                        "name": "group_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/Payment"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/guides": {
             "get": {
                 "description": "Get all guides with optional active filter",
@@ -833,52 +789,6 @@
                         "description": "internal server error",
                         "schema": {
                             "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/payments": {
-            "post": {
-                "description": "Create a new payment intent for a registration or group",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "payments"
-                ],
-                "summary": "Create payment intent",
-                "parameters": [
-                    {
-                        "description": "Payment creation payload",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/PaymentCreatePayload"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/PaymentResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
                         }
                     }
                 }
@@ -1459,723 +1369,6 @@
                 }
             }
         },
-        "/registrations": {
-            "get": {
-                "description": "Get all registrations for the authenticated user",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "registrations"
-                ],
-                "summary": "Get user's registrations",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/RambleRegistration"
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "description": "Register user(s) for a ramble. Supports both single and group registrations. If ramble is full, users are added to waiting list.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "registrations"
-                ],
-                "summary": "Create a new ramble registration",
-                "parameters": [
-                    {
-                        "description": "Registration data",
-                        "name": "registration",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/RambleRegistrationCreatePayload"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/RambleRegistration"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/registrations/admin": {
-            "get": {
-                "description": "Get all registrations with advanced filtering and pagination (admin only)",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin",
-                    "registrations"
-                ],
-                "summary": "Get all registrations (admin)",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "YYYY-MM-DD format",
-                        "name": "date_from",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "YYYY-MM-DD format",
-                        "name": "date_to",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "name": "email",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "name": "per_page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "name": "ramble_id",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "name": "ramble_title",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "name": "search",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "name": "sort_by",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "name": "sort_order",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "name": "status",
-                        "in": "query"
-                    },
-                    {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "collectionFormat": "csv",
-                        "name": "statuses",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "name": "user_id",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/AdminRegistrationListResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/registrations/admin/bulk-action": {
-            "post": {
-                "description": "Perform bulk actions on multiple registrations (admin only)",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin",
-                    "registrations"
-                ],
-                "summary": "Bulk action on registrations (admin)",
-                "parameters": [
-                    {
-                        "description": "Bulk action data",
-                        "name": "bulk",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/BulkRegistrationActionPayload"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/BulkActionResult"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/registrations/admin/{id}": {
-            "put": {
-                "description": "Update registration details like name, email, phone (admin only)",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin",
-                    "registrations"
-                ],
-                "summary": "Update registration details (admin)",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "Registration ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Update data",
-                        "name": "update",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/AdminRegistrationUpdatePayload"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/RambleRegistration"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "description": "Delete a registration (admin only)",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin",
-                    "registrations"
-                ],
-                "summary": "Delete registration (admin)",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "Registration ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/registrations/admin/{id}/status": {
-            "put": {
-                "description": "Update registration status with optional reason (admin only)",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin",
-                    "registrations"
-                ],
-                "summary": "Update registration status (admin)",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "Registration ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Status update data",
-                        "name": "status",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/AdminRegistrationStatusUpdatePayload"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/RambleRegistration"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/registrations/ramble/{rambleId}": {
-            "get": {
-                "description": "Get all registrations for a specific ramble (admin only)",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "registrations"
-                ],
-                "summary": "Get ramble registrations",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "Ramble ID",
-                        "name": "rambleId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/RambleRegistration"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/registrations/{id}": {
-            "get": {
-                "description": "Get details of a specific registration",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "registrations"
-                ],
-                "summary": "Get a registration by ID",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "Registration ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/RambleRegistration"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/registrations/{id}/cancel": {
-            "put": {
-                "description": "Cancel a user's registration for a ramble",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "registrations"
-                ],
-                "summary": "Cancel a registration",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "Registration ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Cancellation data",
-                        "name": "cancellation",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/RambleRegistrationCancelPayload"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/RambleRegistration"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/registrations/{id}/confirm": {
-            "put": {
-                "description": "Confirm or deny participation in a ramble",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "registrations"
-                ],
-                "summary": "Confirm a registration",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "Registration ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Confirmation data",
-                        "name": "confirmation",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/RambleRegistrationConfirmPayload"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/RambleRegistration"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/registrations/{registration_id}/payments": {
-            "get": {
-                "description": "Get all payments associated with a registration",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "payments"
-                ],
-                "summary": "Get payments for registration",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "Registration ID",
-                        "name": "registration_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/Payment"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/ErrResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/reservations": {
             "get": {
                 "description": "Get the reservations of the authenticated booker, with participants, prices, status, estimated amount and payments",
@@ -2254,6 +1447,402 @@
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/reservations/admin": {
+            "get": {
+                "description": "Get the reservations with their participants, with filtering and pagination (admin or guide)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin",
+                    "reservations"
+                ],
+                "summary": "Get all reservations (admin)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Ramble ID",
+                        "name": "ramble_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact contact email",
+                        "name": "email",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Contact email or participant name",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Part of the ramble title",
+                        "name": "ramble_title",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Status: pending, confirmed, waiting_list or cancelled",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "csv",
+                        "description": "Several statuses",
+                        "name": "statuses",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Booker account ID",
+                        "name": "user_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Created since this date (YYYY-MM-DD)",
+                        "name": "date_from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Created until this date included (YYYY-MM-DD)",
+                        "name": "date_to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "created_at (default), contact_email or status",
+                        "name": "sort_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "asc or desc (default)",
+                        "name": "sort_order",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page, from 1",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Reservations per page, 50 by default",
+                        "name": "per_page",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/AdminReservationListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/reservations/admin/bulk-action": {
+            "post": {
+                "description": "Confirm, cancel, move to waiting list or delete several reservations. Each one follows the rules of the single actions, and fails separately.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin",
+                    "reservations"
+                ],
+                "summary": "Bulk action on reservations (admin)",
+                "parameters": [
+                    {
+                        "description": "Bulk action data",
+                        "name": "bulk",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/BulkReservationActionPayload"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/BulkReservationActionResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/reservations/admin/{id}": {
+            "delete": {
+                "description": "Delete a reservation with its participants. The places it held go to the waiting list.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin",
+                    "reservations"
+                ],
+                "summary": "Delete a reservation (admin)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Reservation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/reservations/admin/{id}/participants/{participantId}": {
+            "put": {
+                "description": "Change the name or the price of a participant, to correct an error. The omitted fields are kept. Once the reservation is paid, the price is frozen but the name can still be corrected.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin",
+                    "reservations"
+                ],
+                "summary": "Update a participant of a reservation (admin)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Reservation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Participant ID",
+                        "name": "participantId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Participant data",
+                        "name": "participant",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/AdminParticipantUpdatePayload"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Reservation"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "reservation_paid or reservation_cancelled",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/reservations/admin/{id}/status": {
+            "put": {
+                "description": "Set the status of a reservation, as a whole. A reservation put back in pending, confirmed or waiting list from a status that holds no place must fit entirely in the places left. The places released go to the waiting list.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin",
+                    "reservations"
+                ],
+                "summary": "Update reservation status (admin)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Reservation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Status update data",
+                        "name": "status",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/AdminReservationStatusUpdatePayload"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Reservation"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "not_enough_places",
                         "schema": {
                             "$ref": "#/definitions/ErrResponse"
                         }
@@ -2629,7 +2218,21 @@
         }
     },
     "definitions": {
-        "AdminRegistrationListResponse": {
+        "AdminParticipantUpdatePayload": {
+            "type": "object",
+            "properties": {
+                "first_name": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "price_label": {
+                    "type": "string"
+                }
+            }
+        },
+        "AdminReservationListResponse": {
             "type": "object",
             "properties": {
                 "page": {
@@ -2638,10 +2241,10 @@
                 "per_page": {
                     "type": "integer"
                 },
-                "registrations": {
+                "reservations": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/RambleRegistration"
+                        "$ref": "#/definitions/Reservation"
                     }
                 },
                 "total": {
@@ -2652,38 +2255,15 @@
                 }
             }
         },
-        "AdminRegistrationStatusUpdatePayload": {
+        "AdminReservationStatusUpdatePayload": {
             "type": "object",
             "properties": {
                 "reason": {
                     "type": "string"
                 },
                 "send_email": {
-                    "description": "Whether to send notification email",
+                    "description": "Whether to send the reservation summary to the booker",
                     "type": "boolean"
-                },
-                "status": {
-                    "type": "string"
-                }
-            }
-        },
-        "AdminRegistrationUpdatePayload": {
-            "type": "object",
-            "properties": {
-                "email": {
-                    "type": "string"
-                },
-                "first_name": {
-                    "type": "string"
-                },
-                "last_name": {
-                    "type": "string"
-                },
-                "notes": {
-                    "type": "string"
-                },
-                "phone": {
-                    "type": "string"
                 },
                 "status": {
                     "type": "string"
@@ -2718,24 +2298,46 @@
                 }
             }
         },
-        "BulkActionError": {
+        "BulkReservationActionError": {
             "type": "object",
             "properties": {
                 "error": {
                     "type": "string"
                 },
-                "registration_id": {
+                "reservation_id": {
                     "type": "integer"
                 }
             }
         },
-        "BulkActionResult": {
+        "BulkReservationActionPayload": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "description": "\"confirm\", \"cancel\", \"move_to_waiting\", \"delete\"",
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "reservation_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "send_email": {
+                    "description": "Whether to send the reservation summary to the bookers",
+                    "type": "boolean"
+                }
+            }
+        },
+        "BulkReservationActionResult": {
             "type": "object",
             "properties": {
                 "errors": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/BulkActionError"
+                        "$ref": "#/definitions/BulkReservationActionError"
                     }
                 },
                 "failure_count": {
@@ -2747,30 +2349,8 @@
                 "updated": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/RambleRegistration"
+                        "$ref": "#/definitions/Reservation"
                     }
-                }
-            }
-        },
-        "BulkRegistrationActionPayload": {
-            "type": "object",
-            "properties": {
-                "action": {
-                    "description": "\"confirm\", \"cancel\", \"move_to_waiting\", \"delete\"",
-                    "type": "string"
-                },
-                "reason": {
-                    "type": "string"
-                },
-                "registration_ids": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                },
-                "send_email": {
-                    "description": "Whether to send notification emails",
-                    "type": "boolean"
                 }
             }
         },
@@ -2964,23 +2544,6 @@
                 }
             }
         },
-        "ParticipantInfo": {
-            "type": "object",
-            "properties": {
-                "email": {
-                    "type": "string"
-                },
-                "first_name": {
-                    "type": "string"
-                },
-                "last_name": {
-                    "type": "string"
-                },
-                "phone": {
-                    "type": "string"
-                }
-            }
-        },
         "ParticipantPayload": {
             "type": "object",
             "properties": {
@@ -3041,14 +2604,16 @@
                     "description": "Reason for payment failure",
                     "type": "string"
                 },
-                "group": {
-                    "$ref": "#/definitions/RambleRegistrationGroup"
-                },
                 "group_id": {
                     "type": "integer"
                 },
                 "guide": {
-                    "$ref": "#/definitions/Guide"
+                    "description": "Foreign Objects",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/Guide"
+                        }
+                    ]
                 },
                 "guide_id": {
                     "description": "Guide receiving payment",
@@ -3079,14 +2644,6 @@
                 "refunded_at": {
                     "type": "string"
                 },
-                "registration": {
-                    "description": "Foreign Objects",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/RambleRegistration"
-                        }
-                    ]
-                },
                 "registration_id": {
                     "description": "Legacy registration relationship",
                     "type": "integer"
@@ -3107,42 +2664,6 @@
                     "type": "string"
                 },
                 "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "PaymentCreatePayload": {
-            "type": "object",
-            "required": [
-                "payer_email",
-                "payer_name",
-                "return_url"
-            ],
-            "properties": {
-                "group_id": {
-                    "type": "integer"
-                },
-                "payer_email": {
-                    "type": "string"
-                },
-                "payer_name": {
-                    "type": "string"
-                },
-                "price_label": {
-                    "description": "Deprecated: use PriceSelections for groups",
-                    "type": "string"
-                },
-                "price_selections": {
-                    "description": "For group payments with multiple prices",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/PriceSelection"
-                    }
-                },
-                "registration_id": {
-                    "type": "integer"
-                },
-                "return_url": {
                     "type": "string"
                 }
             }
@@ -3173,22 +2694,6 @@
                 "publishable_key": {
                     "description": "Stripe publishable key for frontend",
                     "type": "string"
-                }
-            }
-        },
-        "PriceSelection": {
-            "type": "object",
-            "required": [
-                "price_label",
-                "quantity"
-            ],
-            "properties": {
-                "price_label": {
-                    "type": "string"
-                },
-                "quantity": {
-                    "type": "integer",
-                    "minimum": 1
                 }
             }
         },
@@ -3406,157 +2911,6 @@
                 }
             }
         },
-        "RambleRegistration": {
-            "type": "object",
-            "properties": {
-                "cancellation_date": {
-                    "type": "string"
-                },
-                "cancellation_reason": {
-                    "type": "string"
-                },
-                "confirmation_date": {
-                    "type": "string"
-                },
-                "confirmation_deadline": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "email": {
-                    "type": "string"
-                },
-                "first_name": {
-                    "type": "string"
-                },
-                "group_id": {
-                    "type": "integer"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "last_name": {
-                    "type": "string"
-                },
-                "phone": {
-                    "type": "string"
-                },
-                "ramble": {
-                    "$ref": "#/definitions/RambleRegistrationSummary"
-                },
-                "ramble_id": {
-                    "type": "integer"
-                },
-                "registration_date": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "user_id": {
-                    "type": "integer"
-                }
-            }
-        },
-        "RambleRegistrationCancelPayload": {
-            "type": "object",
-            "properties": {
-                "reason": {
-                    "type": "string"
-                }
-            }
-        },
-        "RambleRegistrationConfirmPayload": {
-            "type": "object",
-            "properties": {
-                "confirmed": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "RambleRegistrationCreatePayload": {
-            "type": "object",
-            "properties": {
-                "participants": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/ParticipantInfo"
-                    }
-                },
-                "primary_email": {
-                    "description": "Optional for single registration",
-                    "type": "string"
-                },
-                "ramble_id": {
-                    "type": "integer"
-                }
-            }
-        },
-        "RambleRegistrationGroup": {
-            "type": "object",
-            "properties": {
-                "cancellation_date": {
-                    "type": "string"
-                },
-                "cancellation_reason": {
-                    "type": "string"
-                },
-                "confirmation_date": {
-                    "type": "string"
-                },
-                "confirmation_deadline": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "participant_count": {
-                    "type": "integer"
-                },
-                "primary_email": {
-                    "type": "string"
-                },
-                "ramble_id": {
-                    "type": "integer"
-                },
-                "registration_date": {
-                    "type": "string"
-                },
-                "registrations": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/RambleRegistration"
-                    }
-                },
-                "status": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "RambleRegistrationSummary": {
-            "type": "object",
-            "properties": {
-                "date": {
-                    "type": "string"
-                },
-                "location": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string"
-                }
-            }
-        },
         "Reservation": {
             "type": "object",
             "properties": {
@@ -3606,7 +2960,7 @@
                     }
                 },
                 "ramble": {
-                    "$ref": "#/definitions/RambleRegistrationSummary"
+                    "$ref": "#/definitions/ReservationRamble"
                 },
                 "ramble_id": {
                     "type": "integer"
@@ -3674,6 +3028,20 @@
                 }
             }
         },
+        "ReservationRamble": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string"
+                },
+                "location": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
         "ReservationWithPayment": {
             "type": "object",
             "properties": {
@@ -3726,7 +3094,7 @@
                     }
                 },
                 "ramble": {
-                    "$ref": "#/definitions/RambleRegistrationSummary"
+                    "$ref": "#/definitions/ReservationRamble"
                 },
                 "ramble_id": {
                     "type": "integer"

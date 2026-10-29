@@ -7,6 +7,14 @@ import (
 	"feldrise.com/balade/pkg/clock"
 )
 
+const (
+	// tickPeriod is how often the payments left open are cancelled, so that a
+	// payment can hardly be made once the ramble has started.
+	tickPeriod = time.Minute
+	// confirmationsPeriod is how often the confirmations are handled.
+	confirmationsPeriod = time.Hour
+)
+
 // Reservations are the treatments run by the scheduler at a given time.
 type Reservations interface {
 	SendConfirmationRequests(now time.Time) error
@@ -21,34 +29,41 @@ type Reservations interface {
 type ReservationScheduler struct {
 	reservations Reservations
 	clock        clock.Clock
+
+	lastConfirmations time.Time
 }
 
 func NewReservationScheduler(reservations Reservations, clock clock.Clock) *ReservationScheduler {
 	return &ReservationScheduler{reservations: reservations, clock: clock}
 }
 
-// StartScheduler runs the treatments now, then every hour in the background.
+// StartScheduler runs the treatments now, then every minute in the background.
 func (s *ReservationScheduler) StartScheduler() {
-	s.run()
+	s.Tick(s.clock.Now())
 
-	ticker := time.NewTicker(1 * time.Hour)
+	ticker := time.NewTicker(tickPeriod)
 	go func() {
 		for range ticker.C {
-			s.run()
+			s.Tick(s.clock.Now())
 		}
 	}()
 
 	log.Println("Reservation scheduler started")
 }
 
-func (s *ReservationScheduler) run() {
-	now := s.clock.Now()
-	if err := s.reservations.SendConfirmationRequests(now); err != nil {
-		log.Printf("Error sending confirmation requests: %v", err)
+// Tick runs the treatments due at now: the cancellation of the payments left
+// open at every tick, the confirmations once an hour.
+func (s *ReservationScheduler) Tick(now time.Time) {
+	if s.lastConfirmations.IsZero() || now.Sub(s.lastConfirmations) >= confirmationsPeriod {
+		s.lastConfirmations = now
+		if err := s.reservations.SendConfirmationRequests(now); err != nil {
+			log.Printf("Error sending confirmation requests: %v", err)
+		}
+		if err := s.reservations.CancelUnconfirmedReservations(now); err != nil {
+			log.Printf("Error cancelling unconfirmed reservations: %v", err)
+		}
 	}
-	if err := s.reservations.CancelUnconfirmedReservations(now); err != nil {
-		log.Printf("Error cancelling unconfirmed reservations: %v", err)
-	}
+
 	if err := s.reservations.CancelPaymentsOfStartedRambles(now); err != nil {
 		log.Printf("Error cancelling the payments of started rambles: %v", err)
 	}

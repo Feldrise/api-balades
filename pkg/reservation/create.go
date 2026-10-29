@@ -37,7 +37,22 @@ func (config *Config) createReservation(data *model.ReservationCreatePayload, ra
 		return nil, err
 	}
 
-	return config.ReservationRepository.CreateForRamble(ramble.ID, func(active []dbmodel.Reservation) (*dbmodel.Reservation, error) {
+	return config.ReservationRepository.CreateForRamble(ramble.ID, func(locked *dbmodel.Ramble, active []dbmodel.Reservation) (*dbmodel.Reservation, error) {
+		// The ramble may have changed since it was read: the decisions are taken on it as locked.
+		if locked.IsCancelled {
+			return nil, errRambleCancelled()
+		}
+		if max := locked.MaxParticipantsPerReservation(); len(participants) > max {
+			return nil, errTooManyParticipants(max)
+		}
+		for i, participant := range data.Participants {
+			priceLabel, err := resolvePriceLabel(locked, participant.PriceLabel)
+			if err != nil {
+				return nil, err
+			}
+			participants[i].PriceLabel = priceLabel
+		}
+
 		for _, existing := range active {
 			if strings.EqualFold(existing.ContactEmail, data.ContactEmail) {
 				return nil, errReservationAlreadyExists(existing.ID)
@@ -50,7 +65,7 @@ func (config *Config) createReservation(data *model.ReservationCreatePayload, ra
 			ContactEmail: data.ContactEmail,
 			Participants: participants,
 		}
-		config.decideInitialStatus(reservation, ramble, active)
+		config.decideInitialStatus(reservation, locked, active)
 
 		return reservation, nil
 	})

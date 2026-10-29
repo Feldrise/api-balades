@@ -22,6 +22,7 @@ import (
 // @Success 201 {object} model.Reservation
 // @Failure 400 {object} errors.ErrResponse
 // @Failure 404 {object} errors.ErrResponse
+// @Failure 409 {object} errors.ErrResponse "reservation_already_exists or ramble_cancelled"
 // @Failure 500 {object} errors.ErrResponse
 // @Router /reservations [post]
 func (config *Config) Create(w http.ResponseWriter, r *http.Request) {

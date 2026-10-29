@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sync"
 	"testing"
+	"time"
 
 	"feldrise.com/balade/pkg/testharness"
 )
@@ -89,5 +90,38 @@ func TestSimultaneousReservationsOfANewEmailOnTheSameRambleAreRefusedButOne(t *t
 	}
 	if created != 1 {
 		t.Errorf("expected a single reservation created, got %d", created)
+	}
+}
+
+func TestReservationDecidesItsPlacesOnTheRambleAsItIsOnceLocked(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(testharness.RambleOptions{MaxParticipants: testharness.Int(10)})
+	reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(1, "")})
+
+	// An update of the ramble holds its lock while the reservation arrives.
+	update := h.DB.Begin()
+	if err := update.Exec("SELECT id FROM rambles WHERE id = ? FOR UPDATE", ramble.ID).Error; err != nil {
+		t.Fatalf("locking the ramble: %v", err)
+	}
+	if err := update.Exec("UPDATE rambles SET max_participants = 1 WHERE id = ?", ramble.ID).Error; err != nil {
+		t.Fatalf("lowering the capacity: %v", err)
+	}
+	responses := make(chan *testharness.Response, 1)
+	go func() {
+		responses <- h.Do(http.MethodPost, "/reservations", reservationPayload{RambleID: ramble.ID, ContactEmail: "bob@example.com", Participants: people(1, "")}, "")
+	}()
+	time.Sleep(300 * time.Millisecond)
+	if err := update.Commit().Error; err != nil {
+		t.Fatalf("committing the update: %v", err)
+	}
+
+	response := <-responses
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", response.Code, response.Body)
+	}
+	var created reservation
+	response.JSON(t, &created)
+	if created.Status != "waiting_list" {
+		t.Errorf("expected the reservation to wait on the full ramble, got %q", created.Status)
 	}
 }

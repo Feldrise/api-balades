@@ -252,10 +252,11 @@ type ReservationRepository interface {
 	FindAll(filter *ReservationFilter) ([]Reservation, error)
 	// CountAll counts the reservations matching the filter, ignoring its pagination.
 	CountAll(filter *ReservationFilter) (int64, error)
-	// CreateForRamble locks the ramble, hands the ramble's reservations that are
-	// not cancelled to build, and creates the reservation build returns. The lock
-	// makes the capacity and uniqueness decisions of build safe from concurrent creations.
-	CreateForRamble(rambleID uint, build func(active []Reservation) (*Reservation, error)) (*Reservation, error)
+	// CreateForRamble locks the ramble, hands the ramble as it is once locked
+	// (with its prices) and its reservations that are not cancelled to build, and
+	// creates the reservation build returns. The lock makes the capacity and
+	// uniqueness decisions of build safe from concurrent changes.
+	CreateForRamble(rambleID uint, build func(ramble *Ramble, active []Reservation) (*Reservation, error)) (*Reservation, error)
 	// ModifyForRamble locks the ramble and runs modify in a transaction with the
 	// ramble (and its prices) and its reservations that are not cancelled. The
 	// lock makes the capacity decisions of modify safe from concurrent changes.
@@ -478,19 +479,19 @@ func (r *reservationRepository) CountAll(filter *ReservationFilter) (int64, erro
 	return count, err
 }
 
-func (r *reservationRepository) CreateForRamble(rambleID uint, build func(active []Reservation) (*Reservation, error)) (*Reservation, error) {
+func (r *reservationRepository) CreateForRamble(rambleID uint, build func(ramble *Ramble, active []Reservation) (*Reservation, error)) (*Reservation, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	var created *Reservation
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var ramble Ramble
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").First(&ramble, rambleID).Error; err != nil {
+		ramble, err := lockRamble(tx, rambleID)
+		if err != nil {
 			return err
 		}
 
 		var active []Reservation
-		err := tx.Preload("Participants").
+		err = tx.Preload("Participants").
 			Where("ramble_id = ? AND status <> ?", rambleID, ReservationStatusCancelled).
 			Order("created_at ASC").
 			Find(&active).Error
@@ -498,7 +499,7 @@ func (r *reservationRepository) CreateForRamble(rambleID uint, build func(active
 			return err
 		}
 
-		reservation, err := build(active)
+		reservation, err := build(ramble, active)
 		if err != nil {
 			return err
 		}
@@ -522,16 +523,13 @@ func (r *reservationRepository) ModifyForRamble(rambleID uint, modify func(locke
 	defer cancel()
 
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var ramble Ramble
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&ramble, rambleID).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("ramble_id = ?", rambleID).Find(&ramble.Prices).Error; err != nil {
+		ramble, err := lockRamble(tx, rambleID)
+		if err != nil {
 			return err
 		}
 
 		var active []Reservation
-		err := tx.Preload("Participants", func(db *gorm.DB) *gorm.DB { return db.Order("participants.id ASC") }).
+		err = tx.Preload("Participants", func(db *gorm.DB) *gorm.DB { return db.Order("participants.id ASC") }).
 			Preload("Payments").
 			Where("ramble_id = ? AND status <> ?", rambleID, ReservationStatusCancelled).
 			Order("created_at ASC").
@@ -540,8 +538,21 @@ func (r *reservationRepository) ModifyForRamble(rambleID uint, modify func(locke
 			return err
 		}
 
-		return modify(&LockedRamble{tx: tx, Ramble: &ramble, Active: active})
+		return modify(&LockedRamble{tx: tx, Ramble: ramble, Active: active})
 	})
+}
+
+// lockRamble locks the ramble for the transaction and reads it as it is once
+// locked, with its prices, so that the decisions on its places are up to date.
+func lockRamble(tx *gorm.DB, rambleID uint) (*Ramble, error) {
+	var ramble Ramble
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&ramble, rambleID).Error; err != nil {
+		return nil, err
+	}
+	if err := tx.Where("ramble_id = ?", rambleID).Find(&ramble.Prices).Error; err != nil {
+		return nil, err
+	}
+	return &ramble, nil
 }
 
 func (r *reservationRepository) FindAwaitingConfirmationRequest(from time.Time, until time.Time) ([]Reservation, error) {

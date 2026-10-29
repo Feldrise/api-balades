@@ -342,8 +342,9 @@ func (config *Config) respondModified(w http.ResponseWriter, r *http.Request, id
 	render.JSON(w, r, reservation.ToModel())
 }
 
-// cancelObsoletePayments cancels the pending payments of the reservation that
-// no longer match what it owes. A failure is logged without failing the request.
+// cancelObsoletePayments cancels the open payments of the reservation that it
+// can no longer pay. A failure is logged without failing the request: the
+// scheduler cancels them at its next pass (see ReconcileOpenPayments).
 func (config *Config) cancelObsoletePayments(reservation *dbmodel.Reservation) {
 	if err := config.PaymentService.CancelObsoletePayments(reservation); err != nil {
 		log.Printf("Failed to cancel obsolete payments of reservation %d: %v", reservation.ID, err)

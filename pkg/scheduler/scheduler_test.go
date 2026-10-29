@@ -9,10 +9,9 @@ import (
 
 // recordedReservations counts the treatments run.
 type recordedReservations struct {
-	confirmationRequests   int
-	unconfirmedCancels     int
-	startedRamblesPayments int
-	cancelledPayments      int
+	confirmationRequests int
+	unconfirmedCancels   int
+	reconciledPayments   int
 }
 
 func (r *recordedReservations) SendConfirmationRequests(now time.Time) error {
@@ -25,13 +24,8 @@ func (r *recordedReservations) CancelUnconfirmedReservations(now time.Time) erro
 	return nil
 }
 
-func (r *recordedReservations) CancelPaymentsOfStartedRambles(now time.Time) error {
-	r.startedRamblesPayments++
-	return nil
-}
-
-func (r *recordedReservations) CancelPaymentsOfCancelledReservations() error {
-	r.cancelledPayments++
+func (r *recordedReservations) ReconcileOpenPayments() error {
+	r.reconciledPayments++
 	return nil
 }
 
@@ -48,8 +42,8 @@ func TestSchedulerClosesPaymentsEveryMinuteAndRunsTheOtherTreatmentsEveryHour(t 
 		s.Tick(start.Add(time.Duration(minute) * time.Minute))
 	}
 
-	if reservations.startedRamblesPayments != 121 || reservations.cancelledPayments != 121 {
-		t.Errorf("expected the payments closed at each of the 121 minutes, got %d and %d", reservations.startedRamblesPayments, reservations.cancelledPayments)
+	if reservations.reconciledPayments != 121 {
+		t.Errorf("expected the open payments reconciled at each of the 121 minutes, got %d", reservations.reconciledPayments)
 	}
 	if reservations.confirmationRequests != 3 || reservations.unconfirmedCancels != 3 {
 		t.Errorf("expected the confirmations handled at 9:00, 10:00 and 11:00 only, got %d and %d", reservations.confirmationRequests, reservations.unconfirmedCancels)

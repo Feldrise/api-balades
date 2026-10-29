@@ -19,13 +19,12 @@ const (
 type Reservations interface {
 	SendConfirmationRequests(now time.Time) error
 	CancelUnconfirmedReservations(now time.Time) error
-	CancelPaymentsOfStartedRambles(now time.Time) error
-	CancelPaymentsOfCancelledReservations() error
+	ReconcileOpenPayments() error
 }
 
 // ReservationScheduler asks bookers to confirm before the ramble, cancels the
 // reservations left unconfirmed at the deadline and the payments left open
-// once the ramble has started or the reservation cancelled.
+// that the reservation can no longer pay.
 type ReservationScheduler struct {
 	reservations Reservations
 	clock        clock.Clock
@@ -64,10 +63,7 @@ func (s *ReservationScheduler) Tick(now time.Time) {
 		}
 	}
 
-	if err := s.reservations.CancelPaymentsOfStartedRambles(now); err != nil {
-		log.Printf("Error cancelling the payments of started rambles: %v", err)
-	}
-	if err := s.reservations.CancelPaymentsOfCancelledReservations(); err != nil {
-		log.Printf("Error cancelling the payments of cancelled reservations: %v", err)
+	if err := s.reservations.ReconcileOpenPayments(); err != nil {
+		log.Printf("Error reconciling the open payments: %v", err)
 	}
 }

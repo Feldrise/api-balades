@@ -83,25 +83,13 @@ func (config *Config) CancelUnconfirmedReservations(now time.Time) error {
 	return nil
 }
 
-// CancelPaymentsOfStartedRambles cancels the open payments of the reservations
-// of the rambles started at now: payment closes when the ramble starts.
-func (config *Config) CancelPaymentsOfStartedRambles(now time.Time) error {
-	reservations, err := config.ReservationRepository.FindWithOpenPaymentsRambleOnOrBefore(now)
-	if err != nil {
-		return err
-	}
-
-	for i := range reservations {
-		config.cancelObsoletePayments(&reservations[i])
-	}
-	return nil
-}
-
-// CancelPaymentsOfCancelledReservations cancels the open payments left by the
-// reservations cancelled or deleted, or of a cancelled ramble, when their
-// cancellation on Stripe failed at the time.
-func (config *Config) CancelPaymentsOfCancelledReservations() error {
-	reservations, err := config.ReservationRepository.FindCancelledWithOpenPayments()
+// ReconcileOpenPayments cancels the open payments that the reservation can no
+// longer pay (see payments.PaymentService.CancelObsoletePayments): of a
+// reservation cancelled or deleted, of a ramble cancelled or started, of a
+// former amount due or guide. It catches up on the cancellations on Stripe
+// that failed at the time.
+func (config *Config) ReconcileOpenPayments() error {
+	reservations, err := config.ReservationRepository.FindWithOpenPayments()
 	if err != nil {
 		return err
 	}

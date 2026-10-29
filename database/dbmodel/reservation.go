@@ -272,12 +272,9 @@ type ReservationRepository interface {
 	// FindRequestedPendingRambleOnOrBefore returns the pending reservations
 	// asked to confirm whose ramble takes place on or before date.
 	FindRequestedPendingRambleOnOrBefore(date time.Time) ([]Reservation, error)
-	// FindWithOpenPaymentsRambleOnOrBefore returns the reservations with an
-	// open payment whose ramble takes place on or before date.
-	FindWithOpenPaymentsRambleOnOrBefore(date time.Time) ([]Reservation, error)
-	// FindCancelledWithOpenPayments returns the reservations cancelled or
-	// deleted, or of a cancelled ramble, that still have an open payment.
-	FindCancelledWithOpenPayments() ([]Reservation, error)
+	// FindWithOpenPayments returns the reservations, deleted ones included,
+	// that have an open payment, without their associations.
+	FindWithOpenPayments() ([]Reservation, error)
 }
 
 // LockedRamble gives the changes allowed on the reservations of a ramble while it is locked.
@@ -586,28 +583,12 @@ func (r *reservationRepository) MarkConfirmationRequested(id uint, deadline time
 		Update("confirmation_deadline", deadline).Error
 }
 
-func (r *reservationRepository) FindWithOpenPaymentsRambleOnOrBefore(date time.Time) ([]Reservation, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	var reservations []Reservation
-	err := r.db.WithContext(ctx).
-		Joins("JOIN rambles ON rambles.id = reservations.ramble_id").
-		Where("rambles.date <= ?", date).
-		Where("EXISTS (SELECT 1 FROM payments WHERE payments.reservation_id = reservations.id AND payments.deleted_at IS NULL AND payments.status IN ?)", OpenPaymentStatuses).
-		Order("reservations.created_at ASC").
-		Find(&reservations).Error
-	return reservations, err
-}
-
-func (r *reservationRepository) FindCancelledWithOpenPayments() ([]Reservation, error) {
+func (r *reservationRepository) FindWithOpenPayments() ([]Reservation, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	var reservations []Reservation
 	err := r.db.WithContext(ctx).Unscoped().
-		Joins("JOIN rambles ON rambles.id = reservations.ramble_id").
-		Where("reservations.deleted_at IS NOT NULL OR reservations.status = ? OR rambles.is_cancelled = ?", ReservationStatusCancelled, true).
 		Where("EXISTS (SELECT 1 FROM payments WHERE payments.reservation_id = reservations.id AND payments.deleted_at IS NULL AND payments.status IN ?)", OpenPaymentStatuses).
 		Order("reservations.created_at ASC").
 		Find(&reservations).Error

@@ -471,8 +471,8 @@ func TestSchedulerCancelsTheOpenPaymentsOfStartedRambles(t *testing.T) {
 	}
 
 	h.Clock.Set(started.Date.Add(time.Minute))
-	if err := reservations.New(h.Config).CancelPaymentsOfStartedRambles(h.Clock.Now()); err != nil {
-		t.Fatalf("cancelling the payments of started rambles: %v", err)
+	if err := reservations.New(h.Config).ReconcileOpenPayments(); err != nil {
+		t.Fatalf("reconciling the open payments: %v", err)
 	}
 
 	if cancelled := h.Stripe.CancelledPaymentIntents(); len(cancelled) != 1 || cancelled[0] != startedIntent {
@@ -593,8 +593,8 @@ func TestSchedulerCancelsTheOpenPaymentsLeftByACancellationOrADeletion(t *testin
 			}
 
 			h.Stripe.SetCancellationFailing(false)
-			if err := reservations.New(h.Config).CancelPaymentsOfCancelledReservations(); err != nil {
-				t.Fatalf("cancelling the payments of cancelled reservations: %v", err)
+			if err := reservations.New(h.Config).ReconcileOpenPayments(); err != nil {
+				t.Fatalf("reconciling the open payments: %v", err)
 			}
 
 			if cancelled := h.Stripe.CancelledPaymentIntents(); len(cancelled) != 1 || cancelled[0] != intent {
@@ -682,5 +682,37 @@ func TestPendingPaymentToAnotherGuideIsCancelledWhenTheBeneficiaryChanges(t *tes
 	}
 	if open != 1 {
 		t.Errorf("expected a single payment left open, got %+v", got.Payments)
+	}
+}
+
+func TestSchedulerCancelsTheObsoletePaymentsOfAnActiveReservation(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	changed := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	unchanged := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "bob@example.com", Participants: people(1, "Adulte")})
+	token := h.Login("alice@example.com")
+	openConfirmation(h, ramble)
+	confirmReservation(h, changed.ID, token)
+	obsolete := h.Stripe.PaymentIntents()[0].ID
+	confirmReservation(h, unchanged.ID, h.Login("bob@example.com"))
+
+	h.Stripe.SetCancellationFailing(true)
+	if response := removeParticipant(h, changed.ID, changed.Participants[1].ID, token); response.Code != http.StatusOK {
+		t.Fatalf("removing: expected 200, got %d: %s", response.Code, response.Body)
+	}
+	if cancelled := h.Stripe.CancelledPaymentIntents(); len(cancelled) != 0 {
+		t.Fatalf("expected the cancellation on Stripe to fail, got %v", cancelled)
+	}
+
+	h.Stripe.SetCancellationFailing(false)
+	if err := reservations.New(h.Config).ReconcileOpenPayments(); err != nil {
+		t.Fatalf("reconciling the open payments: %v", err)
+	}
+
+	if cancelled := h.Stripe.CancelledPaymentIntents(); len(cancelled) != 1 || cancelled[0] != obsolete {
+		t.Errorf("expected only the payment of the former amount due cancelled on Stripe, got %v", cancelled)
+	}
+	if got := getReservation(t, h, changed.ID, token); len(got.Payments) != 1 || got.Payments[0].Status != "cancelled" {
+		t.Errorf("expected the obsolete payment recorded cancelled, got %+v", got.Payments)
 	}
 }

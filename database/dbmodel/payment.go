@@ -73,9 +73,11 @@ func (p *Payment) NetAmount() int64 {
 	return max(p.Amount-p.RefundedAmount(), 0)
 }
 
-// IsPending reports whether the payment is still to be paid by the payer.
-func (p *Payment) IsPending() bool {
-	return p.Status == "pending" || p.Status == "requires_action"
+// IsOpen reports whether the payment can still be paid on Stripe: neither
+// collected nor cancelled. A declined payment (failed) stays open, as Stripe
+// lets the payer try again with another payment method.
+func (p *Payment) IsOpen() bool {
+	return p.Status == "pending" || p.Status == "requires_action" || p.Status == "failed"
 }
 
 func (p Payment) ToModel() model.Payment {

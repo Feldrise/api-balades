@@ -12,6 +12,7 @@ import (
 	"feldrise.com/balade/pkg/model"
 	"feldrise.com/balade/pkg/payments/stripe"
 	"feldrise.com/balade/pkg/security"
+	stripego "github.com/stripe/stripe-go/v83"
 )
 
 type PaymentService interface {
@@ -93,18 +94,33 @@ func (s *paymentService) createPayment(payments dbmodel.PaymentRepository, reser
 		return nil, err
 	}
 
-	for _, pending := range reservation.Payments {
-		if pending.IsPending() && pending.Amount == amountCents && pending.GuideID == guide.ID {
-			paymentIntent, err := s.stripeService.RetrievePaymentIntent(credentials, pending.StripePaymentIntentID)
-			if err != nil {
-				return nil, fmt.Errorf("failed to retrieve payment intent: %w", err)
-			}
-			return &model.PaymentResponse{
-				Payment:        pending.ToModel(),
-				ClientSecret:   paymentIntent.ClientSecret,
-				PublishableKey: *guide.StripePublicKey,
-			}, nil
+	for i := range reservation.Payments {
+		open := &reservation.Payments[i]
+		if !open.IsOpen() || open.Amount != amountCents || open.GuideID != guide.ID {
+			continue
 		}
+
+		paymentIntent, err := s.stripeService.RetrievePaymentIntent(credentials, open.StripePaymentIntentID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to retrieve payment intent: %w", err)
+		}
+		switch paymentIntent.Status {
+		case stripego.PaymentIntentStatusCanceled:
+			// Cancelled on Stripe without the webhook being received.
+			open.Status = "cancelled"
+			if err := payments.UpdateStatus(open.ID, open.Status); err != nil {
+				return nil, fmt.Errorf("failed to update payment: %w", err)
+			}
+			continue
+		case stripego.PaymentIntentStatusSucceeded, stripego.PaymentIntentStatusProcessing:
+			return nil, errors.New("the payment is being collected, awaiting its confirmation by Stripe")
+		}
+
+		return &model.PaymentResponse{
+			Payment:        open.ToModel(),
+			ClientSecret:   paymentIntent.ClientSecret,
+			PublishableKey: *guide.StripePublicKey,
+		}, nil
 	}
 
 	if err := s.cancelObsoletePayments(payments, reservation); err != nil {
@@ -157,19 +173,19 @@ func (s *paymentService) CancelObsoletePayments(reservation *dbmodel.Reservation
 	})
 }
 
-// cancelObsoletePayments cancels the pending payments of the reservation,
-// locked, that no longer match what it owes.
+// cancelObsoletePayments cancels the open payments of the reservation, locked,
+// that no longer match what it owes.
 func (s *paymentService) cancelObsoletePayments(payments dbmodel.PaymentRepository, reservation *dbmodel.Reservation) error {
 	amountDue := reservation.AmountDue()
 	payable := reservation.Status == dbmodel.ReservationStatusConfirmed && !reservation.HasMissingPrices() && !reservation.Ramble.IsCancelled
 
 	for i := range reservation.Payments {
-		pending := &reservation.Payments[i]
-		if !pending.IsPending() || (payable && pending.Amount == amountDue) {
+		open := &reservation.Payments[i]
+		if !open.IsOpen() || (payable && open.Amount == amountDue) {
 			continue
 		}
 
-		guide, err := s.guideRepo.FindByID(pending.GuideID)
+		guide, err := s.guideRepo.FindByID(open.GuideID)
 		if err != nil {
 			return fmt.Errorf("failed to find payment guide: %w", err)
 		}
@@ -180,12 +196,16 @@ func (s *paymentService) cancelObsoletePayments(payments dbmodel.PaymentReposito
 		if err != nil {
 			return err
 		}
-		if err := s.stripeService.CancelPaymentIntent(credentials, pending.StripePaymentIntentID); err != nil {
-			return fmt.Errorf("failed to cancel obsolete payment %d: %w", pending.ID, err)
+		if err := s.stripeService.CancelPaymentIntent(credentials, open.StripePaymentIntentID); err != nil {
+			// Stripe refuses to cancel a payment intent cancelled already.
+			paymentIntent, retrieveErr := s.stripeService.RetrievePaymentIntent(credentials, open.StripePaymentIntentID)
+			if retrieveErr != nil || paymentIntent.Status != stripego.PaymentIntentStatusCanceled {
+				return fmt.Errorf("failed to cancel obsolete payment %d: %w", open.ID, err)
+			}
 		}
 
-		pending.Status = "cancelled"
-		if err := payments.UpdateStatus(pending.ID, pending.Status); err != nil {
+		open.Status = "cancelled"
+		if err := payments.UpdateStatus(open.ID, open.Status); err != nil {
 			return fmt.Errorf("failed to update payment: %w", err)
 		}
 	}
@@ -219,6 +239,11 @@ func (s *paymentService) ProcessPaymentSuccess(paymentIntentID string) error {
 }
 
 func (s *paymentService) ProcessPaymentFailure(paymentIntentID string, failureReason ...string) error {
+	return s.closePayment(paymentIntentID, "failed", failureReason...)
+}
+
+// closePayment records that the payment failed, or was cancelled on Stripe.
+func (s *paymentService) closePayment(paymentIntentID string, status string, failureReason ...string) error {
 	payment, err := s.paymentRepo.FindByStripePaymentIntentID(paymentIntentID)
 	if err != nil {
 		return fmt.Errorf("failed to find payment: %w", err)
@@ -232,7 +257,7 @@ func (s *paymentService) ProcessPaymentFailure(paymentIntentID string, failureRe
 	}
 
 	// Update payment status
-	payment.Status = "failed"
+	payment.Status = status
 
 	// Set failure reason if provided
 	if len(failureReason) > 0 && failureReason[0] != "" {
@@ -377,7 +402,7 @@ func (s *paymentService) VerifyWebhookAndProcess(payload []byte, signature strin
 		log.Printf("Successfully processed payment failure for %s", eventData.PaymentIntentID)
 
 	case "payment_intent.canceled":
-		err = s.ProcessPaymentFailure(eventData.PaymentIntentID, "Payment canceled")
+		err = s.closePayment(eventData.PaymentIntentID, "cancelled", "Payment canceled")
 		if err != nil {
 			log.Printf("Failed to process payment cancellation for %s: %v", eventData.PaymentIntentID, err)
 			return err

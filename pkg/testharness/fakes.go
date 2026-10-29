@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -191,11 +192,16 @@ func (s *FakeStripeService) RetrievePaymentIntent(credentials stripe.GuideStripe
 
 	for _, intent := range s.paymentIntents {
 		if intent.ID == paymentIntentID {
+			status := stripego.PaymentIntentStatusRequiresPaymentMethod
+			if slices.Contains(s.cancelled, paymentIntentID) {
+				status = stripego.PaymentIntentStatusCanceled
+			}
 			return &stripego.PaymentIntent{
 				ID:           intent.ID,
 				Amount:       intent.Amount,
 				Currency:     stripego.Currency(intent.Currency),
 				ClientSecret: intent.ID + "_secret",
+				Status:       status,
 				Metadata:     intent.Metadata,
 			}, nil
 		}
@@ -203,10 +209,15 @@ func (s *FakeStripeService) RetrievePaymentIntent(credentials stripe.GuideStripe
 	return nil, fmt.Errorf("no such payment intent %q", paymentIntentID)
 }
 
+// CancelPaymentIntent cancels the payment intent, and fails as Stripe does
+// when it is cancelled already.
 func (s *FakeStripeService) CancelPaymentIntent(credentials stripe.GuideStripeCredentials, paymentIntentID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if slices.Contains(s.cancelled, paymentIntentID) {
+		return fmt.Errorf("payment intent %q is cancelled already", paymentIntentID)
+	}
 	s.cancelled = append(s.cancelled, paymentIntentID)
 	return nil
 }

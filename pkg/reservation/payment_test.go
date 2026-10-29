@@ -207,6 +207,7 @@ func TestPartiallyRefundedPaymentCountsForItsNetAmount(t *testing.T) {
 }
 
 type paymentView struct {
+	ID                    uint   `json:"id"`
 	Status                string `json:"status"`
 	GuideID               uint   `json:"guide_id"`
 	StripePaymentIntentID string `json:"stripe_payment_intent_id"`
@@ -321,5 +322,38 @@ func TestSimultaneousConfirmationsPrepareASinglePayment(t *testing.T) {
 	}
 	if got := getReservation(t, h, created.ID, token); len(got.Payments) != 1 {
 		t.Errorf("expected a single payment recorded, got %+v", got.Payments)
+	}
+}
+
+func TestPaymentDeclinedOnceStaysPayableThenIsCancelledWithTheReservation(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	token := h.Login("alice@example.com")
+	openConfirmation(h, ramble)
+	var confirmed reservationWithPayment
+	confirmReservation(h, created.ID, token).JSON(t, &confirmed)
+	p := getPayment(t, h, confirmed.Payment.Payment.ID, token)
+	if response := h.SendStripeWebhook(p.GuideID, "payment_intent.payment_failed", p.StripePaymentIntentID); response.Code != http.StatusOK {
+		t.Fatalf("failed webhook: expected 200, got %d: %s", response.Code, response.Body)
+	}
+
+	var again reservationWithPayment
+	confirmReservation(h, created.ID, token).JSON(t, &again)
+	if again.Payment == nil || again.Payment.Payment.ID != confirmed.Payment.Payment.ID {
+		t.Errorf("expected the declined payment, still payable on Stripe, given back, got %+v", again.Payment)
+	}
+	if intents := h.Stripe.PaymentIntents(); len(intents) != 1 {
+		t.Errorf("expected no other Stripe payment, got %+v", intents)
+	}
+
+	if response := cancelReservation(h, created.ID, token); response.Code != http.StatusOK {
+		t.Fatalf("cancelling: expected 200, got %d: %s", response.Code, response.Body)
+	}
+	if cancelled := h.Stripe.CancelledPaymentIntents(); len(cancelled) != 1 || cancelled[0] != p.StripePaymentIntentID {
+		t.Errorf("expected the declined payment cancelled on Stripe, got %v", cancelled)
+	}
+	if got := getPayment(t, h, p.ID, token); got.Status != "cancelled" {
+		t.Errorf("expected the declined payment cancelled, got %q", got.Status)
 	}
 }

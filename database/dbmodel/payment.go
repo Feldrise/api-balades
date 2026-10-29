@@ -68,6 +68,12 @@ type Payment struct {
 	RefundedAt   *time.Time
 	RefundAmount *int64 // Amount refunded in cents
 
+	// Refund requested from Stripe and not known made yet: its amount in cents
+	// and the idempotency key that identifies it on Stripe, recorded before
+	// the call so that retrying it reuses the key whatever is refunded since.
+	PendingRefundAmount *int64
+	PendingRefundKey    *string
+
 	// Foreign Objects
 	Guide Guide `gorm:"foreignKey:GuideID"`
 }
@@ -177,6 +183,9 @@ type PaymentRepository interface {
 	// refunded recorded never decreases. The statement waits for the payment
 	// locked by ForPayment. It reports whether a payment was changed.
 	RecordRefundedAmount(paymentIntentID string, refunded int64, at time.Time) (bool, error)
+	// SetPendingRefund records the refund of amount cents requested from
+	// Stripe with the idempotency key, or clears it when amount is nil.
+	SetPendingRefund(id uint, amount *int64, key *string) error
 	Delete(id uint) error
 	GetTotalAmountByGuide(guideID uint, status string) (int64, error)
 	// ForReservation locks the reservation and runs decide in a transaction with
@@ -421,6 +430,16 @@ func (r *paymentRepository) RecordRefundedAmount(paymentIntentID string, refunde
 			"status":        gorm.Expr("CASE WHEN ? >= amount THEN 'refunded' ELSE 'partially_refunded' END", refunded),
 		})
 	return result.RowsAffected > 0, result.Error
+}
+
+func (r *paymentRepository) SetPendingRefund(id uint, amount *int64, key *string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	return r.db.WithContext(ctx).Model(&Payment{}).Where("id = ?", id).Updates(map[string]any{
+		"pending_refund_amount": amount,
+		"pending_refund_key":    key,
+	}).Error
 }
 
 func (r *paymentRepository) Delete(id uint) error {

@@ -399,63 +399,120 @@ func ignoreForeignPayment(eventData *stripe.WebhookEventData, err error) error {
 	return nil
 }
 
-// RefundPayment refunds the payment, locked for the whole operation, so that
-// simultaneous refunds add up and never exceed the amount paid. A refund is
-// identified on Stripe by the payment, its amount and the amount refunded
-// before it: retried after its answer was lost, it is not made twice.
+// RefundPayment refunds the payment, locked while each step is decided, so
+// that simultaneous refunds add up and never exceed the amount paid.
+//
+// The refund is recorded pending, with the idempotency key that identifies it
+// on Stripe, before Stripe is called, and stays pending until Stripe's answer
+// is recorded. A refund of the amount pending is the pending refund retried:
+// it reuses its key, so that a refund whose answer was lost is not made twice,
+// even once the charge.refunded webhook recorded it. A refund of another
+// amount, or of the rest (amount nil), settles the pending refund first by
+// retrying it, then is made on what is left to refund.
 func (s *paymentService) RefundPayment(paymentID uint, amount *int64, reason *string) error {
-	return s.paymentRepo.ForPayment(paymentID, func(ctx context.Context, payments dbmodel.PaymentRepository, payment *dbmodel.Payment) error {
-		return s.refund(ctx, payments, payment, amount)
-	})
+	settledOther := false
+	for {
+		request, err := s.requestRefund(paymentID, amount, settledOther)
+		if err != nil {
+			return err
+		}
+		if request == nothingLeftToRefund {
+			return nil
+		}
+		if err := s.settlePendingRefund(paymentID); err != nil {
+			return err
+		}
+		if request != otherRefundPending {
+			return nil
+		}
+		settledOther = true
+	}
 }
 
-func (s *paymentService) refund(ctx context.Context, payments dbmodel.PaymentRepository, payment *dbmodel.Payment, amount *int64) error {
-	if payment == nil {
-		return errors.New("payment not found")
-	}
+// refundRequest is what requestRefund found to do.
+type refundRequest int
 
-	if payment.Status != "succeeded" && payment.Status != "partially_refunded" {
-		return errors.New("can only refund succeeded payments")
-	}
+const (
+	// refundPending: the refund requested is pending, to be made.
+	refundPending refundRequest = iota
+	// otherRefundPending: another refund is pending, to be settled first.
+	otherRefundPending
+	// nothingLeftToRefund: the rest was requested, and the pending refund
+	// settled refunded it all.
+	nothingLeftToRefund
+)
 
-	refundable := payment.Amount - payment.RefundedAmount()
-	if amount == nil {
-		amount = &refundable
-	}
-	if *amount <= 0 || *amount > refundable {
-		return fmt.Errorf("the refund must be between 1 and %d cents", refundable)
-	}
+// requestRefund records the refund of amount cents, or of the rest when amount
+// is nil, pending, unless a refund is pending already: the same amount is the
+// pending refund retried, another one waits for it.
+func (s *paymentService) requestRefund(paymentID uint, amount *int64, settledOther bool) (request refundRequest, err error) {
+	err = s.paymentRepo.ForPayment(paymentID, func(ctx context.Context, payments dbmodel.PaymentRepository, payment *dbmodel.Payment) error {
+		if payment == nil {
+			return errors.New("payment not found")
+		}
+		if payment.PendingRefundAmount != nil {
+			request = otherRefundPending
+			if amount != nil && *amount == *payment.PendingRefundAmount {
+				request = refundPending
+			}
+			return nil
+		}
 
-	// Get guide credentials
-	credentials, err := s.getGuideCredentials(&payment.Guide)
-	if err != nil {
-		return err
-	}
+		refundable := payment.Amount - payment.RefundedAmount()
+		if amount == nil && settledOther && refundable <= 0 {
+			request = nothingLeftToRefund
+			return nil
+		}
+		if payment.Status != "succeeded" && payment.Status != "partially_refunded" {
+			return errors.New("can only refund succeeded payments")
+		}
+		requested := refundable
+		if amount != nil {
+			requested = *amount
+		}
+		if requested <= 0 || requested > refundable {
+			return fmt.Errorf("the refund must be between 1 and %d cents", refundable)
+		}
 
-	// Process refund with Stripe, keyed so that retrying a refund whose answer
-	// was lost refunds nothing more
-	refundedBefore := payment.RefundedAmount()
-	idempotencyKey := fmt.Sprintf("payment-%d-refund-%d-after-%d", payment.ID, *amount, refundedBefore)
-	refunded, err := s.stripeService.RefundPayment(ctx, credentials, payment.StripePaymentIntentID, *amount, idempotencyKey)
-	if err != nil {
-		return fmt.Errorf("failed to process refund: %w", err)
-	}
+		// Keyed on what is refunded before it, so that two refunds of the
+		// same amount are two refunds
+		key := fmt.Sprintf("payment-%d-refund-%d-after-%d", payment.ID, requested, payment.RefundedAmount())
+		request = refundPending
+		return payments.SetPendingRefund(payment.ID, &requested, &key)
+	})
+	return request, err
+}
 
-	// Update payment record with the amount refunded as Stripe knows it, which
-	// catches up on a refund not recorded, and the payment is refunded once entirely
-	payment.RefundAmount = &refunded
-	payment.Status = "partially_refunded"
-	if refunded >= payment.Amount {
-		payment.Status = "refunded"
-	}
-	now := time.Now()
-	payment.RefundedAt = &now
+// settlePendingRefund makes the pending refund of the payment on Stripe, with
+// its idempotency key, so that it is made once however often it is retried,
+// and records the amount refunded as Stripe knows it, which catches up on a
+// refund not recorded. The refund is no longer pending once Stripe answered.
+func (s *paymentService) settlePendingRefund(paymentID uint) error {
+	return s.paymentRepo.ForPayment(paymentID, func(ctx context.Context, payments dbmodel.PaymentRepository, payment *dbmodel.Payment) error {
+		if payment == nil {
+			return errors.New("payment not found")
+		}
+		if payment.PendingRefundAmount == nil || payment.PendingRefundKey == nil {
+			return nil
+		}
 
-	if _, err := payments.Update(payment); err != nil {
-		return fmt.Errorf("failed to update payment record: %w", err)
-	}
+		credentials, err := s.getGuideCredentials(&payment.Guide)
+		if err != nil {
+			return err
+		}
+		refunded, err := s.stripeService.RefundPayment(ctx, credentials, payment.StripePaymentIntentID, *payment.PendingRefundAmount, *payment.PendingRefundKey)
+		if err != nil {
+			return fmt.Errorf("failed to process refund: %w", err)
+		}
 
-	return nil
+		if _, err := payments.RecordRefundedAmount(payment.StripePaymentIntentID, refunded, time.Now()); err != nil {
+			return fmt.Errorf("failed to update payment record: %w", err)
+		}
+		if err := payments.SetPendingRefund(payment.ID, nil, nil); err != nil {
+			return fmt.Errorf("failed to update payment record: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *paymentService) GetPaymentByID(id uint) (*model.Payment, error) {

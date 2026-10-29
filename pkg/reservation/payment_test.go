@@ -786,6 +786,38 @@ func TestARefundRetriedAfterStripeAnsweredTooLateIsMadeOnce(t *testing.T) {
 	}
 }
 
+func TestARefundRetriedAfterItsWebhookRecordedItIsMadeOnce(t *testing.T) {
+	h := testharness.New(t, slowPaymentDecisions)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	paid := h.PayReservation(created.ID, 4000)
+	admin := h.Token(h.CreateUser("admin@example.com", "admin"))
+
+	h.Stripe.SetRefundDelay(2 * time.Second)
+	if response := refundPayment(h, paid.ID, int64Ptr(2000), admin); response.Code == http.StatusOK {
+		t.Fatalf("expected the refund answered too late by Stripe to fail, got %d: %s", response.Code, response.Body)
+	}
+	h.Stripe.SetRefundDelay(0)
+	// Stripe tells the refund made before the admin retries it.
+	reservationMetadata := map[string]string{"reservation_id": fmt.Sprint(created.ID)}
+	if response := h.SendStripeChargeRefunded(paid.GuideID, paid.StripePaymentIntentID, 2000, reservationMetadata); response.Code != http.StatusOK {
+		t.Fatalf("charge.refunded webhook: expected 200, got %d: %s", response.Code, response.Body)
+	}
+
+	if response := refundPayment(h, paid.ID, int64Ptr(2000), admin); response.Code != http.StatusOK {
+		t.Fatalf("retrying: expected 200, got %d: %s", response.Code, response.Body)
+	}
+
+	if refunds := h.Stripe.Refunds(); len(refunds) != 1 || refunds[0].Amount != 2000 {
+		t.Errorf("expected a single refund of 20,00 € on Stripe, got %+v", refunds)
+	}
+	var got refundedReservation
+	h.Do(http.MethodGet, fmt.Sprintf("/reservations/%d", created.ID), nil, h.Login("alice@example.com")).JSON(t, &got)
+	if p := got.Payments[0]; p.Status != "partially_refunded" || p.RefundAmount == nil || *p.RefundAmount != 2000 {
+		t.Errorf("expected 20,00 € refunded and the payment partially refunded, got %+v", p)
+	}
+}
+
 func TestARefundNotRecordedIsCaughtUpByTheNextOne(t *testing.T) {
 	h := testharness.New(t, slowPaymentDecisions)
 	ramble := h.CreateRamble(payingFamilyRamble())

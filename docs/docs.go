@@ -857,7 +857,7 @@ const docTemplate = `{
         },
         "/payments/{id}": {
             "get": {
-                "description": "Get payment details by ID",
+                "description": "Get payment details by ID, for the booker of its reservation or authorized staff",
                 "produces": [
                     "application/json"
                 ],
@@ -887,6 +887,18 @@ const docTemplate = `{
                             "$ref": "#/definitions/ErrResponse"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
@@ -904,7 +916,7 @@ const docTemplate = `{
         },
         "/payments/{id}/refund": {
             "post": {
-                "description": "Process a refund for a payment",
+                "description": "Process a refund for a payment (refund:payments or manage:payments)",
                 "consumes": [
                     "application/json"
                 ],
@@ -945,6 +957,18 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/ErrResponse"
                         }
@@ -1452,6 +1476,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/ErrResponse"
                         }
                     },
+                    "409": {
+                        "description": "reservation_already_exists or ramble_cancelled",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -1708,7 +1738,7 @@ const docTemplate = `{
         },
         "/reservations/admin/{id}/participants/{participantId}": {
             "put": {
-                "description": "Change the name or the price of a participant, to correct an error. The omitted fields are kept. Once the reservation is paid, the price is frozen but the name can still be corrected.",
+                "description": "Change the name or the price of a participant, to correct an error. The omitted fields are kept. Once the reservation is paid, the known prices are frozen but the name can still be corrected and a missing price specified.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1965,7 +1995,7 @@ const docTemplate = `{
         },
         "/reservations/{id}/confirm": {
             "put": {
-                "description": "Confirm a pending reservation, for its booker only. When online payment is enabled, payment holds the payment of the amount due, computed from the participants' prices.",
+                "description": "Confirm a pending reservation, for its booker only, from 3 days before the ramble until the confirmation deadline 12 hours before. When online payment is enabled, payment holds the payment of the amount due, computed from the participants' prices. On a confirmed reservation, it gives the payment of the balance until the ramble starts.",
                 "produces": [
                     "application/json"
                 ],
@@ -2008,7 +2038,7 @@ const docTemplate = `{
                         }
                     },
                     "409": {
-                        "description": "missing_prices, reservation_waiting_list or reservation_cancelled",
+                        "description": "missing_prices, reservation_waiting_list, reservation_cancelled, ramble_cancelled, confirmation_not_open, confirmation_deadline_passed or ramble_started",
                         "schema": {
                             "$ref": "#/definitions/ErrResponse"
                         }
@@ -2018,7 +2048,7 @@ const docTemplate = `{
         },
         "/reservations/{id}/participants": {
             "post": {
-                "description": "Add participants to a pending or confirmed reservation if they all fit in the places left, or to a reservation in waiting list. Participants added to a confirmed reservation are confirmed, and payment holds the complementary payment of their prices when online payment is enabled. The booker receives a summary email.",
+                "description": "Add participants to a pending or confirmed reservation if they all fit in the places left, or to a reservation in waiting list. Participants added to a confirmed reservation are confirmed, and payment holds the complementary payment of their prices when online payment is enabled. When the payment cannot be prepared, the participants stay added and payment_unavailable is true: the complement is paid later through the confirmation. The booker receives a summary email.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2079,7 +2109,7 @@ const docTemplate = `{
                         }
                     },
                     "409": {
-                        "description": "not_enough_places or reservation_cancelled",
+                        "description": "not_enough_places, reservation_cancelled or ramble_cancelled",
                         "schema": {
                             "$ref": "#/definitions/ErrResponse"
                         }
@@ -2089,7 +2119,7 @@ const docTemplate = `{
         },
         "/reservations/{id}/participants/{participantId}": {
             "put": {
-                "description": "Change the name or the price of a participant, as long as the reservation is not paid.",
+                "description": "Change the name or the price of a participant, as long as the reservation is not paid. Once paid, only a missing price (price_missing) can still be specified.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2921,6 +2951,14 @@ const docTemplate = `{
         "Reservation": {
             "type": "object",
             "properties": {
+                "amount_due": {
+                    "description": "AmountDue is the amount in cents left to pay: EstimatedAmount minus AmountPaid, never below zero.",
+                    "type": "integer"
+                },
+                "amount_paid": {
+                    "description": "AmountPaid is the amount in cents paid and kept: the payments succeeded minus their refunds.",
+                    "type": "integer"
+                },
                 "cancellation_date": {
                     "type": "string"
                 },
@@ -2948,7 +2986,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "has_successful_payment": {
-                    "description": "HasSuccessfulPayment tells that a payment succeeded: after a removal or a\ncancellation, the booker is invited to contact the guide for a refund.",
+                    "description": "HasSuccessfulPayment tells that an amount paid is kept (a payment succeeded\nand not entirely refunded): after a removal or a cancellation, the booker\nis invited to contact the guide for a refund.",
                     "type": "boolean"
                 },
                 "id": {
@@ -3030,7 +3068,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
-                    "description": "pending, succeeded, failed, cancelled, refunded",
+                    "description": "pending, requires_action, succeeded, failed, cancelled, partially_refunded, refunded",
                     "type": "string"
                 }
             }
@@ -3052,6 +3090,14 @@ const docTemplate = `{
         "ReservationWithPayment": {
             "type": "object",
             "properties": {
+                "amount_due": {
+                    "description": "AmountDue is the amount in cents left to pay: EstimatedAmount minus AmountPaid, never below zero.",
+                    "type": "integer"
+                },
+                "amount_paid": {
+                    "description": "AmountPaid is the amount in cents paid and kept: the payments succeeded minus their refunds.",
+                    "type": "integer"
+                },
                 "cancellation_date": {
                     "type": "string"
                 },
@@ -3079,7 +3125,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "has_successful_payment": {
-                    "description": "HasSuccessfulPayment tells that a payment succeeded: after a removal or a\ncancellation, the booker is invited to contact the guide for a refund.",
+                    "description": "HasSuccessfulPayment tells that an amount paid is kept (a payment succeeded\nand not entirely refunded): after a removal or a cancellation, the booker\nis invited to contact the guide for a refund.",
                     "type": "boolean"
                 },
                 "id": {
@@ -3093,6 +3139,10 @@ const docTemplate = `{
                 },
                 "payment": {
                     "$ref": "#/definitions/PaymentResponse"
+                },
+                "payment_unavailable": {
+                    "description": "PaymentUnavailable tells that the change is saved but the payment could not\nbe prepared: it is to be made later, by confirming the reservation again.",
+                    "type": "boolean"
                 },
                 "payments": {
                     "type": "array",

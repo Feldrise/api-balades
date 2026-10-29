@@ -257,3 +257,127 @@ func TestSecondReservationWithSameEmailIsRefusedWithDedicatedError(t *testing.T)
 
 	reserve(t, h, reservationPayload{RambleID: other.ID, ContactEmail: "alice@example.com", Participants: people(1, "Adulte")})
 }
+
+type rambleView struct {
+	PlacesLeft                    *int `json:"places_left"`
+	MaxParticipantsPerReservation int  `json:"max_participants_per_reservation"`
+}
+
+func getRamble(t *testing.T, h *testharness.Harness, id uint) rambleView {
+	t.Helper()
+
+	response := h.Do(http.MethodGet, fmt.Sprintf("/rambles/%d", id), nil, "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /rambles/%d: expected 200, got %d: %s", id, response.Code, response.Body)
+	}
+	var view rambleView
+	response.JSON(t, &view)
+	return view
+}
+
+func describe(places *int) string {
+	if places == nil {
+		return "unlimited"
+	}
+	return fmt.Sprint(*places)
+}
+
+func TestReservationThatDoesNotFitGoesEntirelyToWaitingList(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(testharness.RambleOptions{MaxParticipants: testharness.Int(5)})
+
+	first := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "a@example.com", Participants: people(3, "")})
+	tooBig := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "b@example.com", Participants: people(3, "")})
+
+	if first.Status != "pending" {
+		t.Errorf("expected the first reservation pending, got %q", first.Status)
+	}
+	if tooBig.Status != "waiting_list" || len(tooBig.Participants) != 3 {
+		t.Errorf("expected the whole second reservation (3 participants) in waiting list, got %q with %d participants", tooBig.Status, len(tooBig.Participants))
+	}
+	if left := getRamble(t, h, ramble.ID).PlacesLeft; left == nil || *left != 2 {
+		t.Fatalf("expected 2 places left (waiting list not counted), got %s", describe(left))
+	}
+
+	fits := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "c@example.com", Participants: people(2, "")})
+
+	if fits.Status != "pending" {
+		t.Errorf("expected a reservation fitting the 2 places left to be pending, got %q", fits.Status)
+	}
+	if left := getRamble(t, h, ramble.ID).PlacesLeft; left == nil || *left != 0 {
+		t.Errorf("expected no place left, got %s", describe(left))
+	}
+}
+
+func TestReservationCannotExceedRambleCapacity(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(testharness.RambleOptions{MaxParticipants: testharness.Int(4)})
+
+	response := h.Do(http.MethodPost, "/reservations", reservationPayload{
+		RambleID: ramble.ID, ContactEmail: "a@example.com", Participants: people(5, ""),
+	}, "")
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", response.Code, response.Body)
+	}
+	var body errorBody
+	response.JSON(t, &body)
+	if body.Reason != "too_many_participants" {
+		t.Errorf("expected reason too_many_participants, got %s", response.Body)
+	}
+	if max := getRamble(t, h, ramble.ID).MaxParticipantsPerReservation; max != 4 {
+		t.Errorf("expected the ramble to expose a maximum of 4 participants per reservation, got %d", max)
+	}
+
+	if created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "a@example.com", Participants: people(4, "")}); created.Status != "pending" {
+		t.Errorf("expected a reservation of the whole capacity to be pending, got %q", created.Status)
+	}
+}
+
+func TestUnlimitedRambleCapsReservationsAtTwentyParticipants(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(testharness.RambleOptions{})
+
+	tooMany := h.Do(http.MethodPost, "/reservations", reservationPayload{
+		RambleID: ramble.ID, ContactEmail: "a@example.com", Participants: people(21, ""),
+	}, "")
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "b@example.com", Participants: people(20, "")})
+
+	if tooMany.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for 21 participants, got %d: %s", tooMany.Code, tooMany.Body)
+	}
+	if created.Status != "pending" || len(created.Participants) != 20 {
+		t.Errorf("expected a pending reservation of 20 participants, got %q with %d", created.Status, len(created.Participants))
+	}
+	view := getRamble(t, h, ramble.ID)
+	if view.MaxParticipantsPerReservation != 20 || view.PlacesLeft != nil {
+		t.Errorf("expected unlimited places and a maximum of 20 per reservation, got %+v", view)
+	}
+}
+
+func TestReservationWithinThreeDaysOfRambleIsConfirmedAutomatically(t *testing.T) {
+	h := testharness.New(t)
+	rambleDate := time.Date(2030, time.June, 15, 9, 0, 0, 0, time.UTC)
+	soon := h.CreateRamble(testharness.RambleOptions{Date: &rambleDate, MaxParticipants: testharness.Int(3)})
+	h.Clock.Set(rambleDate.Add(-72 * time.Hour))
+
+	confirmed := reserve(t, h, reservationPayload{RambleID: soon.ID, ContactEmail: "a@example.com", Participants: people(2, "")})
+	waiting := reserve(t, h, reservationPayload{RambleID: soon.ID, ContactEmail: "b@example.com", Participants: people(2, "")})
+
+	if confirmed.Status != "confirmed" {
+		t.Errorf("expected a reservation 3 days before the ramble to be confirmed, got %q", confirmed.Status)
+	}
+	if confirmed.ConfirmationDate == nil || !confirmed.ConfirmationDate.Equal(h.Clock.Now()) {
+		t.Errorf("expected the confirmation date to be now (%s), got %v", h.Clock.Now(), confirmed.ConfirmationDate)
+	}
+	if waiting.Status != "waiting_list" {
+		t.Errorf("expected a reservation that does not fit to stay in waiting list, got %q", waiting.Status)
+	}
+
+	h.Clock.Set(rambleDate.Add(-73 * time.Hour))
+	later := h.CreateRamble(testharness.RambleOptions{Date: &rambleDate})
+	pending := reserve(t, h, reservationPayload{RambleID: later.ID, ContactEmail: "a@example.com", Participants: people(1, "")})
+	if pending.Status != "pending" {
+		t.Errorf("expected a reservation more than 3 days before the ramble to be pending, got %q", pending.Status)
+	}
+}

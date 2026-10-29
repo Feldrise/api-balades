@@ -2,6 +2,7 @@ package reservation
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	apierrors "feldrise.com/balade/pkg/errors"
@@ -28,6 +29,14 @@ func (e *businessError) Error() string {
 
 func errInvalidPrice(message string) error {
 	return &businessError{status: http.StatusBadRequest, reason: "invalid_price", message: message}
+}
+
+func errTooManyParticipants(max int) error {
+	return &businessError{
+		status:  http.StatusBadRequest,
+		reason:  "too_many_participants",
+		message: fmt.Sprintf("a reservation cannot have more than %d participants for this ramble", max),
+	}
 }
 
 func errReservationAlreadyExists(reservationID uint) error {

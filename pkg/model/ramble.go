@@ -38,6 +38,8 @@ type Ramble struct {
 	CancellationReason     *string       `json:"cancellation_reason,omitempty"`
 	Guides                 []Guide       `json:"guides,omitempty"`
 	PlacesLeft             *int          `json:"places_left,omitempty"`
+	// MaxParticipantsPerReservation is the capacity, or a safeguard when the ramble is unlimited.
+	MaxParticipantsPerReservation int `json:"max_participants_per_reservation"`
 
 	// Payment fields
 	PaymentGuideID  *uint  `json:"payment_guide_id,omitempty"`

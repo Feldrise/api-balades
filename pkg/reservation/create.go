@@ -3,12 +3,20 @@ package reservation
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"feldrise.com/balade/database/dbmodel"
 	"feldrise.com/balade/pkg/model"
 )
 
+// autoConfirmationPeriod is how close to the ramble a reservation is confirmed on creation.
+const autoConfirmationPeriod = 3 * 24 * time.Hour
+
 func (config *Config) createReservation(data *model.ReservationCreatePayload, ramble *dbmodel.Ramble) (*dbmodel.Reservation, error) {
+	if max := ramble.MaxParticipantsPerReservation(); len(data.Participants) > max {
+		return nil, errTooManyParticipants(max)
+	}
+
 	participants := make([]dbmodel.Participant, len(data.Participants))
 	for i, participant := range data.Participants {
 		priceLabel, err := resolvePriceLabel(ramble, participant.PriceLabel)
@@ -36,14 +44,39 @@ func (config *Config) createReservation(data *model.ReservationCreatePayload, ra
 			}
 		}
 
-		return &dbmodel.Reservation{
+		reservation := &dbmodel.Reservation{
 			RambleID:     ramble.ID,
 			UserID:       user.ID,
 			ContactEmail: data.ContactEmail,
-			Status:       dbmodel.ReservationStatusPending,
 			Participants: participants,
-		}, nil
+		}
+		config.decideInitialStatus(reservation, ramble, active)
+
+		return reservation, nil
 	})
+}
+
+// decideInitialStatus puts the whole reservation in waiting list when its
+// participants do not all fit in the places left, and confirms it right away
+// when the ramble is within the confirmation period.
+func (config *Config) decideInitialStatus(reservation *dbmodel.Reservation, ramble *dbmodel.Ramble, active []dbmodel.Reservation) {
+	placesLeft := ramble.PlacesLeftFor(active)
+	if placesLeft != nil && len(reservation.Participants) > *placesLeft {
+		reservation.Status = dbmodel.ReservationStatusWaitingList
+		return
+	}
+
+	now := config.Clock.Now()
+	if ramble.Date != nil {
+		untilRamble := ramble.Date.Sub(now)
+		if untilRamble >= 0 && untilRamble <= autoConfirmationPeriod {
+			reservation.Status = dbmodel.ReservationStatusConfirmed
+			reservation.ConfirmationDate = &now
+			return
+		}
+	}
+
+	reservation.Status = dbmodel.ReservationStatusPending
 }
 
 // findOrCreateBooker returns the single account of the booker, found or created

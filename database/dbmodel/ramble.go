@@ -59,7 +59,9 @@ type Ramble struct {
 	// Foreign Objects
 	Prices        []RamblePrice        `gorm:"foreignKey:RambleID;"`
 	Registrations []RambleRegistration `gorm:"foreignKey:RambleID;"`
-	PaymentGuide  *Guide               `gorm:"foreignKey:PaymentGuideID"`
+	// Reservations is loaded with the reservations taking places only.
+	Reservations []Reservation `gorm:"foreignKey:RambleID;"`
+	PaymentGuide *Guide        `gorm:"foreignKey:PaymentGuideID"`
 
 	// Computed fields (not stored in database)
 	PlacesLeft *int `gorm:"-"`
@@ -73,24 +75,41 @@ func (rm *Ramble) IsPublished() bool {
 	return !rm.PublishedAt.After(time.Now())
 }
 
-// CalculatePlacesLeft computes the number of available places for the ramble
-func (rm *Ramble) CalculatePlacesLeft() {
+// UnlimitedRambleMaxParticipantsPerReservation is the safeguard on the number of
+// participants of a reservation when the ramble has no capacity.
+const UnlimitedRambleMaxParticipantsPerReservation = 20
+
+// MaxParticipantsPerReservation is the ramble's capacity, or a safeguard when it is unlimited.
+func (rm *Ramble) MaxParticipantsPerReservation() int {
 	if rm.MaxParticipants == nil {
-		rm.PlacesLeft = nil // Unlimited places
-		return
+		return UnlimitedRambleMaxParticipantsPerReservation
+	}
+	return *rm.MaxParticipants
+}
+
+// PlacesLeftFor returns the places left given the ramble's reservations, nil when unlimited.
+func (rm *Ramble) PlacesLeftFor(reservations []Reservation) *int {
+	if rm.MaxParticipants == nil {
+		return nil
 	}
 
-	reservationCount := 0
-	for _, registration := range rm.Registrations {
-		if registration.Status != "cancelled" {
-			reservationCount++
-		}
-	}
+	placesLeft := *rm.MaxParticipants - OccupiedPlaces(reservations)
+	return &placesLeft
+}
 
-	placesLeft := *rm.MaxParticipants - reservationCount
+// CalculatePlacesLeft computes the number of available places for the ramble
+// from its loaded reservations.
+func (rm *Ramble) CalculatePlacesLeft() {
+	placesLeft := rm.PlacesLeftFor(rm.Reservations)
 
-	// We keep the negative value to indicate waitlist status
-	rm.PlacesLeft = &placesLeft
+	// We keep a negative value (capacity lowered below the occupied places)
+	rm.PlacesLeft = placesLeft
+}
+
+func preloadPlacesTaken(tx *gorm.DB) *gorm.DB {
+	return tx.
+		Preload("Reservations", "status IN ?", []string{ReservationStatusPending, ReservationStatusConfirmed}).
+		Preload("Reservations.Participants")
 }
 
 func (rm Ramble) ToModel() model.Ramble {
@@ -140,6 +159,8 @@ func (rm Ramble) ToModel() model.Ramble {
 		PaymentEnabled:         rm.PaymentEnabled,
 		PaymentRequired:        rm.PaymentRequired,
 	}
+
+	rambleModel.MaxParticipantsPerReservation = rm.MaxParticipantsPerReservation()
 
 	if rm.PaymentGuide != nil {
 		paymentGuide := rm.PaymentGuide.ToModel()
@@ -193,6 +214,7 @@ func (r *rambleRepository) FindByID(id uint, includeUnpublished bool) (*Ramble, 
 	tx = applyPublishedFilter(tx, includeUnpublished)
 
 	tx = tx.Preload("Prices").Preload("Guides").Preload("Registrations").Preload("PaymentGuide")
+	tx = preloadPlacesTaken(tx)
 
 	err := tx.First(&ramble, id).Error
 
@@ -256,6 +278,7 @@ func (r *rambleRepository) FindAll(filter *RambleFilter) ([]Ramble, error) {
 	}
 
 	tx = tx.Preload("Prices").Preload("Guides").Preload("Registrations").Preload("PaymentGuide")
+	tx = preloadPlacesTaken(tx)
 
 	err := tx.Find(&rambles).Error
 

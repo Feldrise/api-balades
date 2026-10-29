@@ -270,17 +270,18 @@ func (config *Config) respondWithPayment(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	config.cancelObsoletePayments(reservation)
-
 	result := &model.ReservationWithPayment{}
 	if reservation.Status == dbmodel.ReservationStatusConfirmed && reservation.Ramble.PaymentEnabled && !reservation.Ramble.IsCancelled &&
 		!reservation.Ramble.HasStarted(config.Clock.Now()) && !reservation.HasMissingPrices() && reservation.AmountDue() > 0 {
+		// The payment is decided once the reservation is locked, along with the
+		// cancellation of the payments it can no longer pay.
 		firstName, lastName := reservation.BookerName()
 		result.Payment, err = config.PaymentService.CreatePaymentForReservation(reservation, payments.PayerInfo{
 			Email: reservation.ContactEmail,
 			Name:  strings.TrimSpace(firstName + " " + lastName),
 		})
 		if err != nil {
+			config.cancelObsoletePayments(reservation)
 			if notPayable := notPayableError(err); notPayable != nil {
 				// The reservation stopped being payable since it was read.
 				render.Render(w, r, renderError(notPayable))
@@ -297,6 +298,8 @@ func (config *Config) respondWithPayment(w http.ResponseWriter, r *http.Request,
 			render.Render(w, r, errors.ErrServerError(err))
 			return
 		}
+	} else {
+		config.cancelObsoletePayments(reservation)
 	}
 
 	result.Reservation = reservation.ToModel()

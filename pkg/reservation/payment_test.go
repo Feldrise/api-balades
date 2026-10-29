@@ -527,15 +527,18 @@ func TestRefundedPaymentWithoutTheAmountRefundedCountsAsEntirelyRefunded(t *test
 func TestPaymentIsNotPreparedWhenTheReservationStopsBeingPayableDuringTheConfirmation(t *testing.T) {
 	cases := []struct {
 		name   string
-		change func(tx *gorm.DB, created reservation, ramble *dbmodel.Ramble)
+		change func(h *testharness.Harness, tx *gorm.DB, created reservation, ramble *dbmodel.Ramble)
 		reason string
 	}{
-		{"reservation cancelled", func(tx *gorm.DB, created reservation, ramble *dbmodel.Ramble) {
+		{"reservation cancelled", func(h *testharness.Harness, tx *gorm.DB, created reservation, ramble *dbmodel.Ramble) {
 			tx.Exec("UPDATE reservations SET status = 'cancelled' WHERE id = ?", created.ID)
 		}, "reservation_cancelled"},
-		{"ramble cancelled", func(tx *gorm.DB, created reservation, ramble *dbmodel.Ramble) {
+		{"ramble cancelled", func(h *testharness.Harness, tx *gorm.DB, created reservation, ramble *dbmodel.Ramble) {
 			tx.Exec("UPDATE rambles SET is_cancelled = true WHERE id = ?", ramble.ID)
 		}, "ramble_cancelled"},
+		{"ramble started", func(h *testharness.Harness, tx *gorm.DB, created reservation, ramble *dbmodel.Ramble) {
+			h.Clock.Set(ramble.Date.Add(time.Minute))
+		}, "ramble_started"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -554,7 +557,7 @@ func TestPaymentIsNotPreparedWhenTheReservationStopsBeingPayableDuringTheConfirm
 			done := make(chan *testharness.Response)
 			go func() { done <- confirmReservation(h, created.ID, token) }()
 			waitForLockWait(t, h)
-			c.change(changing, created, ramble)
+			c.change(h, changing, created, ramble)
 			if err := changing.Commit().Error; err != nil {
 				t.Fatalf("committing the change: %v", err)
 			}

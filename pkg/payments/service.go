@@ -214,29 +214,11 @@ func (s *paymentService) cancelObsoletePayments(payments dbmodel.PaymentReposito
 }
 
 func (s *paymentService) ProcessPaymentSuccess(paymentIntentID string) error {
-	payment, err := s.paymentRepo.FindByStripePaymentIntentID(paymentIntentID)
-	if err != nil {
-		return fmt.Errorf("failed to find payment: %w", err)
-	}
-	if payment == nil {
-		return errors.New("payment not found")
-	}
 	// A late event never brings back a refunded payment.
-	if payment.IsCollected() {
-		return nil
-	}
-
-	// Update payment status
-	payment.Status = "succeeded"
-	now := time.Now()
-	payment.PaidAt = &now
-
-	_, err = s.paymentRepo.Update(payment)
-	if err != nil {
-		return fmt.Errorf("failed to update payment: %w", err)
-	}
-
-	return nil
+	return s.recordStatus(paymentIntentID, dbmodel.CollectedPaymentStatuses, map[string]any{
+		"status":  "succeeded",
+		"paid_at": time.Now(),
+	})
 }
 
 func (s *paymentService) ProcessPaymentFailure(paymentIntentID string, failureReason ...string) error {
@@ -245,6 +227,30 @@ func (s *paymentService) ProcessPaymentFailure(paymentIntentID string, failureRe
 
 // closePayment records that the payment failed, or was cancelled on Stripe.
 func (s *paymentService) closePayment(paymentIntentID string, status string, failureReason ...string) error {
+	changes := map[string]any{"status": status}
+	if len(failureReason) > 0 && failureReason[0] != "" {
+		changes["failure_reason"] = failureReason[0]
+	}
+	return s.recordStatus(paymentIntentID, uncollectedOnly, changes)
+}
+
+// uncollectedOnly are the statuses a failure, a cancellation or a required
+// action never replaces: a late event never downgrades a payment collected,
+// nor reopens a payment cancelled.
+var uncollectedOnly = append([]string{"cancelled"}, dbmodel.CollectedPaymentStatuses...)
+
+// recordStatus applies the changes to the payment of the payment intent, in a
+// single statement, unless its status is one of kept when it runs, so that a
+// concurrent event is never overwritten.
+func (s *paymentService) recordStatus(paymentIntentID string, kept []string, changes map[string]any) error {
+	updated, err := s.paymentRepo.UpdateByStripePaymentIntentID(paymentIntentID, kept, changes)
+	if err != nil {
+		return fmt.Errorf("failed to update payment: %w", err)
+	}
+	if updated {
+		return nil
+	}
+
 	payment, err := s.paymentRepo.FindByStripePaymentIntentID(paymentIntentID)
 	if err != nil {
 		return fmt.Errorf("failed to find payment: %w", err)
@@ -252,24 +258,6 @@ func (s *paymentService) closePayment(paymentIntentID string, status string, fai
 	if payment == nil {
 		return errors.New("payment not found")
 	}
-	// A late event never downgrades a payment collected.
-	if payment.IsCollected() {
-		return nil
-	}
-
-	// Update payment status
-	payment.Status = status
-
-	// Set failure reason if provided
-	if len(failureReason) > 0 && failureReason[0] != "" {
-		payment.FailureReason = &failureReason[0]
-	}
-
-	_, err = s.paymentRepo.Update(payment)
-	if err != nil {
-		return fmt.Errorf("failed to update payment: %w", err)
-	}
-
 	return nil
 }
 
@@ -411,24 +399,7 @@ func (s *paymentService) VerifyWebhookAndProcess(payload []byte, signature strin
 		log.Printf("Successfully processed payment cancellation for %s", eventData.PaymentIntentID)
 
 	case "payment_intent.requires_action":
-		// Update status to requires_action if needed
-		payment, err := s.paymentRepo.FindByStripePaymentIntentID(eventData.PaymentIntentID)
-		if err != nil {
-			log.Printf("Failed to find payment for intent %s: %v", eventData.PaymentIntentID, err)
-			return err
-		}
-
-		if payment == nil {
-			log.Printf("No payment found for intent %s", eventData.PaymentIntentID)
-			return nil
-		}
-		// A late event never downgrades a payment collected.
-		if payment.IsCollected() {
-			return nil
-		}
-
-		payment.Status = "requires_action"
-		_, err = s.paymentRepo.Update(payment)
+		err = s.recordStatus(eventData.PaymentIntentID, uncollectedOnly, map[string]any{"status": "requires_action"})
 		if err != nil {
 			log.Printf("Failed to update payment status to requires_action for %s: %v", eventData.PaymentIntentID, err)
 			return err

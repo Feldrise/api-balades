@@ -3,6 +3,7 @@ package dbmodel
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	"feldrise.com/balade/pkg/model"
@@ -51,9 +52,13 @@ type Payment struct {
 	Guide Guide `gorm:"foreignKey:GuideID"`
 }
 
+// CollectedPaymentStatuses are the statuses of a payment paid, whether it has
+// been refunded since or not.
+var CollectedPaymentStatuses = []string{"succeeded", "partially_refunded", "refunded"}
+
 // IsCollected reports whether the payment was paid, whether it has been refunded since or not.
 func (p *Payment) IsCollected() bool {
-	return p.Status == "succeeded" || p.Status == "partially_refunded" || p.Status == "refunded"
+	return slices.Contains(CollectedPaymentStatuses, p.Status)
 }
 
 // RefundedAmount returns the amount in cents refunded so far.
@@ -133,6 +138,11 @@ type PaymentRepository interface {
 	Update(payment *Payment) (*Payment, error)
 	// UpdateStatus saves the status of the payment only.
 	UpdateStatus(id uint, status string) error
+	// UpdateByStripePaymentIntentID applies changes to the payment of the
+	// Stripe payment intent in a single statement, unless its status is one of
+	// kept, as it is when the statement runs. It reports whether a payment was
+	// changed.
+	UpdateByStripePaymentIntentID(paymentIntentID string, kept []string, changes map[string]any) (bool, error)
 	Delete(id uint) error
 	GetTotalAmountByGuide(guideID uint, status string) (int64, error)
 	// ForReservation locks the reservation and runs decide in a transaction with
@@ -331,6 +341,16 @@ func (r *paymentRepository) UpdateStatus(id uint, status string) error {
 	defer cancel()
 
 	return r.db.WithContext(ctx).Model(&Payment{}).Where("id = ?", id).Update("status", status).Error
+}
+
+func (r *paymentRepository) UpdateByStripePaymentIntentID(paymentIntentID string, kept []string, changes map[string]any) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result := r.db.WithContext(ctx).Model(&Payment{}).
+		Where("stripe_payment_intent_id = ? AND status NOT IN ?", paymentIntentID, kept).
+		Updates(changes)
+	return result.RowsAffected > 0, result.Error
 }
 
 func (r *paymentRepository) Delete(id uint) error {

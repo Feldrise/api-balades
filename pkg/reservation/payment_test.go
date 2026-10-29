@@ -382,3 +382,52 @@ func TestOpenPaymentsAreCancelledWhenAnAdminDeletesTheReservation(t *testing.T) 
 		})
 	}
 }
+
+// waitForLockWait waits until a query of the database waits for a lock.
+func waitForLockWait(t *testing.T, h *testharness.Harness) {
+	t.Helper()
+
+	for range 100 {
+		var waiting int64
+		h.DB.Raw("SELECT COUNT(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()").Scan(&waiting)
+		if waiting > 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("expected a query to wait for the payment being collected")
+}
+
+func TestWebhookReceivedWhileThePaymentSucceedsNeverDowngradesIt(t *testing.T) {
+	for _, late := range []string{"payment_intent.payment_failed", "payment_intent.requires_action", "payment_intent.canceled"} {
+		t.Run(late, func(t *testing.T) {
+			h := testharness.New(t)
+			ramble := h.CreateRamble(payingFamilyRamble())
+			created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+			token := h.Login("alice@example.com")
+			openConfirmation(h, ramble)
+			var confirmed reservationWithPayment
+			confirmReservation(h, created.ID, token).JSON(t, &confirmed)
+			p := getPayment(t, h, confirmed.Payment.Payment.ID, token)
+
+			// The success is being recorded while the other webhook arrives.
+			succeeding := h.DB.Begin()
+			if err := succeeding.Exec("UPDATE payments SET status = 'succeeded' WHERE id = ?", p.ID).Error; err != nil {
+				t.Fatalf("recording the success: %v", err)
+			}
+			done := make(chan *testharness.Response)
+			go func() { done <- h.SendStripeWebhook(p.GuideID, late, p.StripePaymentIntentID) }()
+			waitForLockWait(t, h)
+			if err := succeeding.Commit().Error; err != nil {
+				t.Fatalf("committing the success: %v", err)
+			}
+			if response := <-done; response.Code != http.StatusOK {
+				t.Fatalf("webhook: expected 200, got %d: %s", response.Code, response.Body)
+			}
+
+			if got := getPayment(t, h, p.ID, token); got.Status != "succeeded" {
+				t.Errorf("expected the payment to stay succeeded, got %q", got.Status)
+			}
+		})
+	}
+}

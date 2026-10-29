@@ -2,6 +2,7 @@ package reservation
 
 import (
 	"feldrise.com/balade/config"
+	"feldrise.com/balade/pkg/authentication"
 	"github.com/go-chi/chi"
 )
 
@@ -11,6 +12,11 @@ func New(configuration *config.Config) *Config {
 
 func (config *Config) Routes() *chi.Mux {
 	router := chi.NewRouter()
+
+	router.Route("/admin", func(r chi.Router) {
+		r.Use(authentication.RequireAuthentication())
+		r.Get("/", config.AdminList)
+	})
 
 	router.Post("/", config.Create)
 	router.Get("/", config.GetUserReservations)

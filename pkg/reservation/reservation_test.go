@@ -42,6 +42,7 @@ type payment struct {
 type reservation struct {
 	ID               uint          `json:"id"`
 	RambleID         uint          `json:"ramble_id"`
+	UserID           uint          `json:"user_id"`
 	ContactEmail     string        `json:"contact_email"`
 	Status           string        `json:"status"`
 	ConfirmationDate *time.Time    `json:"confirmation_date"`

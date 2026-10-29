@@ -208,12 +208,33 @@ func (r *Reservation) ToModel() *model.Reservation {
 }
 
 type ReservationFilter struct {
-	UserID *uint
+	UserID   *uint
+	RambleID *uint
+	// RambleIDs restricts to these rambles. A non-nil empty slice matches nothing.
+	RambleIDs []uint
+	// Email is the exact contact email, whatever its case.
+	Email *string
+	// Search matches the contact email and the names of the participants.
+	Search      *string
+	RambleTitle *string
+	Status      *string
+	Statuses    []string
+	// CreatedFrom and CreatedTo bound the creation date, both included.
+	CreatedFrom *time.Time
+	CreatedTo   *time.Time
+	// SortBy is created_at (by default), contact_email or status. SortDesc is
+	// true by default: the newest reservations come first.
+	SortBy  string
+	SortAsc bool
+	Limit   *int
+	Offset  *int
 }
 
 type ReservationRepository interface {
 	FindByID(id uint) (*Reservation, error)
 	FindAll(filter *ReservationFilter) ([]Reservation, error)
+	// CountAll counts the reservations matching the filter, ignoring its pagination.
+	CountAll(filter *ReservationFilter) (int64, error)
 	// CreateForRamble locks the ramble, hands the ramble's reservations that are
 	// not cancelled to build, and creates the reservation build returns. The lock
 	// makes the capacity and uniqueness decisions of build safe from concurrent creations.
@@ -324,20 +345,92 @@ func (r *reservationRepository) FindByID(id uint) (*Reservation, error) {
 	return &reservation, nil
 }
 
+func applyReservationFilter(tx *gorm.DB, filter *ReservationFilter) *gorm.DB {
+	if filter == nil {
+		return tx
+	}
+	if filter.UserID != nil {
+		tx = tx.Where("reservations.user_id = ?", *filter.UserID)
+	}
+	if filter.RambleID != nil {
+		tx = tx.Where("reservations.ramble_id = ?", *filter.RambleID)
+	}
+	if filter.Email != nil {
+		tx = tx.Where("LOWER(reservations.contact_email) = LOWER(?)", *filter.Email)
+	}
+	if filter.Search != nil && *filter.Search != "" {
+		term := "%" + *filter.Search + "%"
+		tx = tx.Where(`(reservations.contact_email ILIKE ? OR EXISTS (
+			SELECT 1 FROM participants
+			WHERE participants.reservation_id = reservations.id AND participants.deleted_at IS NULL
+			AND (participants.first_name ILIKE ? OR participants.last_name ILIKE ?)))`, term, term, term)
+	}
+	if filter.RambleTitle != nil && *filter.RambleTitle != "" {
+		tx = tx.Where("reservations.ramble_id IN (SELECT id FROM rambles WHERE title ILIKE ?)", "%"+*filter.RambleTitle+"%")
+	}
+	if filter.Status != nil {
+		tx = tx.Where("reservations.status = ?", *filter.Status)
+	}
+	if len(filter.Statuses) > 0 {
+		tx = tx.Where("reservations.status IN ?", filter.Statuses)
+	}
+	if filter.CreatedFrom != nil {
+		tx = tx.Where("reservations.created_at >= ?", *filter.CreatedFrom)
+	}
+	if filter.CreatedTo != nil {
+		tx = tx.Where("reservations.created_at <= ?", *filter.CreatedTo)
+	}
+	if filter.RambleIDs != nil {
+		if len(filter.RambleIDs) == 0 {
+			tx = tx.Where("1 = 0")
+		} else {
+			tx = tx.Where("reservations.ramble_id IN ?", filter.RambleIDs)
+		}
+	}
+	return tx
+}
+
 func (r *reservationRepository) FindAll(filter *ReservationFilter) ([]Reservation, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	tx := r.db.WithContext(ctx).Model(&Reservation{})
+	tx := applyReservationFilter(r.db.WithContext(ctx).Model(&Reservation{}), filter)
 	if filter != nil {
-		if filter.UserID != nil {
-			tx = tx.Where("user_id = ?", *filter.UserID)
+		if filter.Limit != nil {
+			tx = tx.Limit(*filter.Limit)
+		}
+		if filter.Offset != nil {
+			tx = tx.Offset(*filter.Offset)
 		}
 	}
 
 	var reservations []Reservation
-	err := preloadReservation(tx).Order("created_at DESC").Find(&reservations).Error
+	err := preloadReservation(tx).Order(reservationOrder(filter)).Find(&reservations).Error
 	return reservations, err
+}
+
+// reservationOrder orders by the filter's sort field, then by id to keep pages stable.
+func reservationOrder(filter *ReservationFilter) string {
+	column, direction := "created_at", "DESC"
+	if filter != nil {
+		switch filter.SortBy {
+		case "contact_email", "status":
+			column = filter.SortBy
+		}
+		if filter.SortAsc {
+			direction = "ASC"
+		}
+	}
+	return "reservations." + column + " " + direction + ", reservations.id " + direction
+}
+
+func (r *reservationRepository) CountAll(filter *ReservationFilter) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var count int64
+	err := applyReservationFilter(r.db.WithContext(ctx).Model(&Reservation{}), filter).Count(&count).Error
+	return count, err
 }
 
 func (r *reservationRepository) CreateForRamble(rambleID uint, build func(active []Reservation) (*Reservation, error)) (*Reservation, error) {

@@ -2,6 +2,7 @@ package reservation
 
 import (
 	"slices"
+	"time"
 
 	"feldrise.com/balade/database/dbmodel"
 	"feldrise.com/balade/pkg/model"
@@ -151,8 +152,10 @@ func (config *Config) changeParticipant(reservation *dbmodel.Reservation, partic
 }
 
 // confirmReservation confirms a pending reservation, once every participant's
-// price is known so that the amount to pay is complete. Confirming a
-// reservation already confirmed changes nothing.
+// price is known so that the amount to pay is complete, and within the
+// confirmation period: from J-3 until the confirmation deadline (H-12).
+// Confirming a reservation already confirmed changes nothing, so that its
+// balance can be paid, until the ramble starts.
 func (config *Config) confirmReservation(reservation *dbmodel.Reservation) error {
 	return config.ReservationRepository.ModifyForRamble(reservation.RambleID, func(locked *dbmodel.LockedRamble) error {
 		active := locked.Reservation(reservation.ID)
@@ -167,11 +170,18 @@ func (config *Config) confirmReservation(reservation *dbmodel.Reservation) error
 				return errMissingPrices()
 			}
 		}
+		now := config.Clock.Now()
 		if active.Status == dbmodel.ReservationStatusConfirmed {
+			// Its balance is payable until the ramble starts.
+			if locked.Ramble.Date != nil && !now.Before(*locked.Ramble.Date) {
+				return errRambleStarted()
+			}
 			return nil
 		}
+		if err := checkConfirmationPeriod(locked.Ramble, now); err != nil {
+			return err
+		}
 
-		now := config.Clock.Now()
 		active.Status = dbmodel.ReservationStatusConfirmed
 		active.ConfirmationDate = &now
 		return locked.SaveStatus(active)
@@ -238,6 +248,19 @@ func findParticipant(reservation *dbmodel.Reservation, participantID uint) *dbmo
 		if reservation.Participants[i].ID == participantID {
 			return &reservation.Participants[i]
 		}
+	}
+	return nil
+}
+
+// checkConfirmationPeriod tells whether a pending reservation of the ramble can
+// be confirmed at now: from the confirmation request (J-3) until the
+// confirmation deadline (H-12).
+func checkConfirmationPeriod(ramble *dbmodel.Ramble, now time.Time) error {
+	if ramble.Date == nil || now.Before(ramble.Date.Add(-confirmationRequestPeriod)) {
+		return errConfirmationNotOpen()
+	}
+	if !now.Before(ramble.Date.Add(-confirmationDeadlineBeforeRamble)) {
+		return errConfirmationDeadlinePassed()
 	}
 	return nil
 }

@@ -98,6 +98,7 @@ func TestBookerConfirmsAReservationWithoutOnlinePayment(t *testing.T) {
 	ramble := h.CreateRamble(familyRamble())
 	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
 	token := h.Login("alice@example.com")
+	openConfirmation(h, ramble)
 
 	response := confirmReservation(h, created.ID, token)
 
@@ -219,6 +220,7 @@ func TestConfirmationCreatesThePaymentOfTheParticipantsPrices(t *testing.T) {
 	ramble := h.CreateRamble(payingFamilyRamble())
 	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: append(people(2, "Adulte"), people(1, "Enfant")...)})
 	token := h.Login("alice@example.com")
+	openConfirmation(h, ramble)
 
 	response := confirmReservation(h, created.ID, token)
 
@@ -302,6 +304,7 @@ func TestConfirmedButUnpaidReservationKeepsItsPlacesAtTheDeadline(t *testing.T) 
 	ramble := h.CreateRamble(options)
 	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
 	token := h.Login("alice@example.com")
+	openConfirmation(h, ramble)
 	if response := confirmReservation(h, created.ID, token); response.Code != http.StatusOK {
 		t.Fatalf("confirming: expected 200, got %d: %s", response.Code, response.Body)
 	}
@@ -311,5 +314,61 @@ func TestConfirmedButUnpaidReservationKeepsItsPlacesAtTheDeadline(t *testing.T) 
 
 	if got := getReservation(t, h, created.ID, token); got.Status != "confirmed" {
 		t.Errorf("expected the confirmed reservation to keep its places without payment, got %q", got.Status)
+	}
+}
+
+func confirmationRefusal(t *testing.T, response *testharness.Response) string {
+	t.Helper()
+
+	if response.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", response.Code, response.Body)
+	}
+	var body errorBody
+	response.JSON(t, &body)
+	return body.Reason
+}
+
+func TestPendingReservationIsConfirmedOnlyWithinTheConfirmationPeriod(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(familyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	token := h.Login("alice@example.com")
+
+	h.Clock.Set(ramble.Date.Add(-3*24*time.Hour - time.Hour))
+	if reason := confirmationRefusal(t, confirmReservation(h, created.ID, token)); reason != "confirmation_not_open" {
+		t.Errorf("before J-3: expected reason confirmation_not_open, got %q", reason)
+	}
+
+	h.Clock.Set(ramble.Date.Add(-11 * time.Hour))
+	if reason := confirmationRefusal(t, confirmReservation(h, created.ID, token)); reason != "confirmation_deadline_passed" {
+		t.Errorf("after H-12: expected reason confirmation_deadline_passed, got %q", reason)
+	}
+	if got := getReservation(t, h, created.ID, token); got.Status != "pending" {
+		t.Fatalf("expected the reservation to stay pending, got %q", got.Status)
+	}
+
+	h.Clock.Set(ramble.Date.Add(-13 * time.Hour))
+	if response := confirmReservation(h, created.ID, token); response.Code != http.StatusOK {
+		t.Errorf("before H-12: expected 200, got %d: %s", response.Code, response.Body)
+	}
+}
+
+func TestConfirmedReservationBalanceIsPayableUntilTheRambleStarts(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	h.Clock.Set(ramble.Date.Add(-2 * 24 * time.Hour))
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	token := h.Login("alice@example.com")
+
+	h.Clock.Set(ramble.Date.Add(-time.Hour))
+	var unpaid reservationWithPayment
+	confirmReservation(h, created.ID, token).JSON(t, &unpaid)
+	if unpaid.Payment == nil || unpaid.Payment.Payment.Amount != 2500 {
+		t.Fatalf("expected the balance payable after H-12, got %+v", unpaid.Payment)
+	}
+
+	h.Clock.Set(ramble.Date.Add(time.Minute))
+	if reason := confirmationRefusal(t, confirmReservation(h, created.ID, token)); reason != "ramble_started" {
+		t.Errorf("after the start: expected reason ramble_started, got %q", reason)
 	}
 }

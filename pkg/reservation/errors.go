@@ -84,6 +84,26 @@ func errMissingPrices() error {
 	}
 }
 
+func errConfirmationNotOpen() error {
+	return &businessError{
+		status:  http.StatusConflict,
+		reason:  "confirmation_not_open",
+		message: "the reservation can be confirmed from 3 days before the ramble",
+	}
+}
+
+func errConfirmationDeadlinePassed() error {
+	return &businessError{
+		status:  http.StatusConflict,
+		reason:  "confirmation_deadline_passed",
+		message: "the confirmation deadline, 12 hours before the ramble, has passed",
+	}
+}
+
+func errRambleStarted() error {
+	return &businessError{status: http.StatusConflict, reason: "ramble_started", message: "the ramble has started"}
+}
+
 func errParticipantNotFound() error {
 	return &businessError{status: http.StatusNotFound, reason: "participant_not_found", message: "no such participant in this reservation"}
 }

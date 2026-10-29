@@ -140,6 +140,7 @@ func TestParticipantsAddedToAPaidReservationAreConfirmedWithAComplementaryPaymen
 	ramble := h.CreateRamble(payingFamilyRamble())
 	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
 	token := h.Login("alice@example.com")
+	openConfirmation(h, ramble)
 	if response := confirmReservation(h, created.ID, token); response.Code != http.StatusOK {
 		t.Fatalf("confirming: expected 200, got %d: %s", response.Code, response.Body)
 	}

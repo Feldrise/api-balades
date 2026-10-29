@@ -128,7 +128,7 @@ func (config *Config) UpdateParticipant(w http.ResponseWriter, r *http.Request) 
 }
 
 // @Summary Confirm a reservation
-// @Description Confirm a pending reservation, for its booker only. When online payment is enabled, payment holds the payment of the amount due, computed from the participants' prices.
+// @Description Confirm a pending reservation, for its booker only, from 3 days before the ramble until the confirmation deadline 12 hours before. When online payment is enabled, payment holds the payment of the amount due, computed from the participants' prices. On a confirmed reservation, it gives the payment of the balance until the ramble starts.
 // @Tags reservations
 // @Produce json
 // @Param id path int true "Reservation ID"
@@ -136,7 +136,7 @@ func (config *Config) UpdateParticipant(w http.ResponseWriter, r *http.Request) 
 // @Failure 401 {object} errors.ErrResponse
 // @Failure 403 {object} errors.ErrResponse
 // @Failure 404 {object} errors.ErrResponse
-// @Failure 409 {object} errors.ErrResponse "missing_prices, reservation_waiting_list or reservation_cancelled"
+// @Failure 409 {object} errors.ErrResponse "missing_prices, reservation_waiting_list, reservation_cancelled, confirmation_not_open, confirmation_deadline_passed or ramble_started"
 // @Router /reservations/{id}/confirm [put]
 func (config *Config) Confirm(w http.ResponseWriter, r *http.Request) {
 	reservation, ok := config.bookerReservation(w, r)

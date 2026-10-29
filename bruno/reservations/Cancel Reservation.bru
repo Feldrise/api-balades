@@ -15,7 +15,7 @@ auth:bearer {
 }
 
 docs {
-  Cancels the whole reservation and admits the waiting reservations that fit. has_successful_payment tells to contact the guide for a refund.
+  Cancels the whole reservation, cancels its pending payments and admits the waiting reservations that fit. has_successful_payment tells to contact the guide for a refund. Restricted to the booker, or staff with update:registration-status (or its :self variant on their rambles).
 }
 
 tests {

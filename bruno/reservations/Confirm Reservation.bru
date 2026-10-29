@@ -15,7 +15,7 @@ auth:bearer {
 }
 
 docs {
-  Confirms the reservation, for its booker only. When online payment is enabled, payment holds the Stripe payment of the amount due, computed from the participants' prices. Calling it again on a confirmed reservation gives the payment of what is still due. Refused with missing_prices while a participant's price is unknown.
+  Confirms the pending reservation, for its booker only, from 3 days before the ramble (409 confirmation_not_open before) until the confirmation deadline 12 hours before (409 confirmation_deadline_passed after). When online payment is enabled, payment holds the Stripe payment of the amount due (amount_due), computed from the participants' prices minus the amount paid net of refunds; the pending payment of the same amount is given back rather than a new one. Calling it again on a confirmed reservation gives the payment of the balance, until the ramble starts (409 ramble_started). Refused with missing_prices while a participant's price is unknown, and ramble_cancelled on a cancelled ramble. payment_unavailable is true when the payment could not be prepared: call again later.
 }
 
 tests {

@@ -23,7 +23,7 @@ body:json {
 }
 
 docs {
-  Changes the name or price of a participant, refused with 409 reservation_paid once a payment succeeded.
+  Changes the name or price of a participant, refused with 409 reservation_paid once an amount is paid, except to specify a missing price (price_missing): the balance is then payable through Confirm Reservation. Restricted to the booker, or staff with update:registration-details (or its :self variant on their rambles).
 }
 
 tests {

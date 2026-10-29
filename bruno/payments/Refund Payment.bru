@@ -1,0 +1,32 @@
+meta {
+  name: Refund Payment
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/payments/{{payment_id}}/refund
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+body:json {
+  {
+    "amount": 1000,
+    "reason": "requested_by_customer"
+  }
+}
+
+docs {
+  Refunds a payment, entirely without amount or partly with an amount in cents up to what is left to refund. Refunds add up in refund_amount: the payment is partially_refunded, then refunded once entirely; the reservation counts its net amount as paid. Restricted to refund:payments or manage:payments.
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

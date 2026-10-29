@@ -15,7 +15,7 @@ auth:bearer {
 }
 
 docs {
-  Removes a participant. Removing the last one cancels the reservation. has_successful_payment tells to contact the guide for a refund.
+  Removes a participant. Removing the last one cancels the reservation. Pending payments of an obsolete amount are cancelled. has_successful_payment tells to contact the guide for a refund. Restricted to the booker, or staff with update:registration-details (or its :self variant on their rambles).
 }
 
 tests {

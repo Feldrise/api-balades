@@ -3,11 +3,13 @@ package reservation
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"feldrise.com/balade/database/dbmodel"
 	"feldrise.com/balade/pkg/authentication"
 	"feldrise.com/balade/pkg/errors"
 	"feldrise.com/balade/pkg/model"
+	"github.com/go-chi/chi"
 	"github.com/go-chi/render"
 )
 
@@ -80,4 +82,51 @@ func (config *Config) GetUserReservations(w http.ResponseWriter, r *http.Request
 	}
 
 	render.JSON(w, r, result)
+}
+
+// @Summary Get a reservation
+// @Description Get a reservation, for its booker or an admin or guide allowed to view the ramble's registrations
+// @Tags reservations
+// @Produce json
+// @Param id path int true "Reservation ID"
+// @Success 200 {object} model.Reservation
+// @Failure 401 {object} errors.ErrResponse
+// @Failure 403 {object} errors.ErrResponse
+// @Failure 404 {object} errors.ErrResponse
+// @Failure 500 {object} errors.ErrResponse
+// @Router /reservations/{id} [get]
+func (config *Config) Get(w http.ResponseWriter, r *http.Request) {
+	user := authentication.ForContext(r.Context())
+	if user == nil {
+		render.Render(w, r, errors.ErrUnauthorized("authentication required"))
+		return
+	}
+
+	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("invalid ID")))
+		return
+	}
+
+	reservation, err := config.ReservationRepository.FindByID(uint(id))
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return
+	}
+	if reservation == nil {
+		render.Render(w, r, errors.ErrNotFound())
+		return
+	}
+
+	allowed, err := config.canView(user, reservation)
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return
+	}
+	if !allowed {
+		render.Render(w, r, errors.ErrForbidden("insufficient permissions"))
+		return
+	}
+
+	render.JSON(w, r, reservation.ToModel())
 }

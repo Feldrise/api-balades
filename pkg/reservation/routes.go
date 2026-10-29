@@ -14,6 +14,7 @@ func (config *Config) Routes() *chi.Mux {
 
 	router.Post("/", config.Create)
 	router.Get("/", config.GetUserReservations)
+	router.Get("/{id}", config.Get)
 
 	return router
 }

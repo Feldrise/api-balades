@@ -381,3 +381,68 @@ func TestReservationWithinThreeDaysOfRambleIsConfirmedAutomatically(t *testing.T
 		t.Errorf("expected a reservation more than 3 days before the ramble to be pending, got %q", pending.Status)
 	}
 }
+
+func TestOnlyTheBookerOrAnAuthorizedStaffCanReadAReservation(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(familyRamble())
+	otherRamble := h.CreateRamble(familyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	path := fmt.Sprintf("/reservations/%d", created.ID)
+
+	admin := h.CreateUser("admin@example.com", "admin")
+	owningGuide := h.CreateUser("guide@example.com", "guide")
+	h.CreateGuide(owningGuide, ramble)
+	otherGuide := h.CreateUser("other-guide@example.com", "guide")
+	h.CreateGuide(otherGuide, otherRamble)
+	stranger := h.CreateUser("bob@example.com", "user")
+
+	cases := []struct {
+		name  string
+		token string
+		code  int
+	}{
+		{"booker", h.Login("alice@example.com"), http.StatusOK},
+		{"admin", h.Token(admin), http.StatusOK},
+		{"guide of the ramble", h.Token(owningGuide), http.StatusOK},
+		{"guide of another ramble", h.Token(otherGuide), http.StatusForbidden},
+		{"another user", h.Token(stranger), http.StatusForbidden},
+		{"anonymous visitor", "", http.StatusUnauthorized},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			response := h.Do(http.MethodGet, path, nil, c.token)
+
+			if response.Code != c.code {
+				t.Fatalf("expected %d, got %d: %s", c.code, response.Code, response.Body)
+			}
+			if c.code == http.StatusOK {
+				var got reservation
+				response.JSON(t, &got)
+				if got.ID != created.ID || len(got.Participants) != 2 || got.EstimatedAmount != 2500 {
+					t.Errorf("unexpected reservation: %s", response.Body)
+				}
+			}
+		})
+	}
+}
+
+func TestReadingAnUnknownReservationIsNotFound(t *testing.T) {
+	h := testharness.New(t)
+	admin := h.CreateUser("admin@example.com", "admin")
+
+	response := h.Do(http.MethodGet, "/reservations/999", nil, h.Token(admin))
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", response.Code, response.Body)
+	}
+}
+
+func TestAnonymousVisitorCannotListReservations(t *testing.T) {
+	h := testharness.New(t)
+
+	response := h.Do(http.MethodGet, "/reservations", nil, "")
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", response.Code, response.Body)
+	}
+}

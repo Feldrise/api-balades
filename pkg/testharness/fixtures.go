@@ -142,3 +142,26 @@ func (h *Harness) Login(address string) string {
 
 	return body.Token
 }
+
+// CreateGuide inserts a guide profile linked to user and assigned to the rambles.
+func (h *Harness) CreateGuide(user *dbmodel.User, rambles ...*dbmodel.Ramble) *dbmodel.Guide {
+	h.t.Helper()
+
+	guide := &dbmodel.Guide{
+		UserID:    &user.ID,
+		FirstName: "Guide",
+		LastName:  "Nature",
+		Email:     user.Email,
+	}
+	if err := h.DB.Create(guide).Error; err != nil {
+		h.t.Fatalf("creating guide: %v", err)
+	}
+
+	for _, ramble := range rambles {
+		if err := h.DB.Create(&dbmodel.RambleGuide{RambleID: ramble.ID, GuideID: guide.ID}).Error; err != nil {
+			h.t.Fatalf("assigning guide to ramble %d: %v", ramble.ID, err)
+		}
+	}
+
+	return guide
+}

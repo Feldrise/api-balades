@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"feldrise.com/balade/database/dbmodel"
 	"feldrise.com/balade/pkg/testharness"
 )
 
@@ -485,5 +486,35 @@ func TestParticipantOfAnotherReservationIsNotFound(t *testing.T) {
 	}
 	if got := getReservation(t, h, theirs.ID, h.Login("bob@example.com")); len(got.Participants) != 2 {
 		t.Errorf("expected bob's reservation untouched, got %d participants", len(got.Participants))
+	}
+}
+
+func TestViewingPermissionsDoNotAllowModifyingAReservation(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(familyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	viewer := h.CreateUserWithPermissions("viewer@example.com", "view:all-registrations")
+	guideViewer := h.CreateUserWithPermissions("guide-viewer@example.com", "view:registrations:self")
+	h.CreateGuide(guideViewer, ramble)
+	p := created.Participants[0]
+
+	for _, user := range []*dbmodel.User{viewer, guideViewer} {
+		token := h.Token(user)
+		if response := h.Do(http.MethodGet, fmt.Sprintf("/reservations/%d", created.ID), nil, token); response.Code != http.StatusOK {
+			t.Fatalf("%s: expected to read the reservation, got %d", user.Email, response.Code)
+		}
+		for _, response := range []*testharness.Response{
+			addParticipants(h, created.ID, people(1, "Adulte"), token),
+			updateParticipant(h, created.ID, p.ID, participantUpdatePayload{FirstName: "Zoé", LastName: "Durand", PriceLabel: "Enfant"}, token),
+			removeParticipant(h, created.ID, p.ID, token),
+			cancelReservation(h, created.ID, token),
+		} {
+			if response.Code != http.StatusForbidden {
+				t.Errorf("%s: expected 403, got %d: %s", user.Email, response.Code, response.Body)
+			}
+		}
+	}
+	if got := getReservation(t, h, created.ID, h.Login("alice@example.com")); got.Status != "pending" || len(got.Participants) != 2 {
+		t.Errorf("expected the reservation untouched, got %q with %d participants", got.Status, len(got.Participants))
 	}
 }

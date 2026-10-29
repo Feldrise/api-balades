@@ -31,7 +31,7 @@ import (
 // @Failure 409 {object} errors.ErrResponse "not_enough_places or reservation_cancelled"
 // @Router /reservations/{id}/participants [post]
 func (config *Config) AddParticipants(w http.ResponseWriter, r *http.Request) {
-	reservation, ok := config.reservationToModify(w, r)
+	reservation, ok := config.reservationToModify(w, r, permissionsChangeParticipants)
 	if !ok {
 		return
 	}
@@ -70,7 +70,7 @@ func (config *Config) AddParticipants(w http.ResponseWriter, r *http.Request) {
 // @Failure 409 {object} errors.ErrResponse "reservation_cancelled"
 // @Router /reservations/{id}/participants/{participantId} [delete]
 func (config *Config) RemoveParticipant(w http.ResponseWriter, r *http.Request) {
-	reservation, ok := config.reservationToModify(w, r)
+	reservation, ok := config.reservationToModify(w, r, permissionsChangeParticipants)
 	if !ok {
 		return
 	}
@@ -104,7 +104,7 @@ func (config *Config) RemoveParticipant(w http.ResponseWriter, r *http.Request) 
 // @Failure 409 {object} errors.ErrResponse "reservation_paid or reservation_cancelled"
 // @Router /reservations/{id}/participants/{participantId} [put]
 func (config *Config) UpdateParticipant(w http.ResponseWriter, r *http.Request) {
-	reservation, ok := config.reservationToModify(w, r)
+	reservation, ok := config.reservationToModify(w, r, permissionsChangeParticipants)
 	if !ok {
 		return
 	}
@@ -164,7 +164,7 @@ func (config *Config) Confirm(w http.ResponseWriter, r *http.Request) {
 // @Failure 409 {object} errors.ErrResponse "reservation_cancelled"
 // @Router /reservations/{id}/cancel [put]
 func (config *Config) Cancel(w http.ResponseWriter, r *http.Request) {
-	reservation, ok := config.reservationToModify(w, r)
+	reservation, ok := config.reservationToModify(w, r, permissionsChangeStatus)
 	if !ok {
 		return
 	}
@@ -178,31 +178,31 @@ func (config *Config) Cancel(w http.ResponseWriter, r *http.Request) {
 	config.respondModified(w, r, reservation.ID, changeNone, result.promoted)
 }
 
-// reservationToModify returns the reservation of the request when the user is
-// its booker or an admin or guide allowed on its ramble, and renders the error otherwise.
-func (config *Config) reservationToModify(w http.ResponseWriter, r *http.Request) (*dbmodel.Reservation, bool) {
-	user := authentication.ForContext(r.Context())
-	if user == nil {
-		render.Render(w, r, errors.ErrUnauthorized("authentication required"))
-		return nil, false
-	}
+// modifyPermissions are the blanket and self permissions that allow staff to
+// make a change on the reservations of a ramble, as on the admin routes.
+type modifyPermissions struct {
+	blanket string
+	self    string
+}
 
-	id, ok := parseID(w, r, "id")
+var (
+	permissionsChangeParticipants = modifyPermissions{"update:registration-details", "update:registration-details:self"}
+	permissionsChangeStatus       = modifyPermissions{"update:registration-status", "update:registration-status:self"}
+)
+
+// reservationToModify returns the reservation of the request when the user is
+// its booker, or holds the permissions to make the change on its ramble, and
+// renders the error otherwise.
+func (config *Config) reservationToModify(w http.ResponseWriter, r *http.Request, permissions modifyPermissions) (*dbmodel.Reservation, bool) {
+	user, reservation, ok := config.requestReservation(w, r)
 	if !ok {
 		return nil, false
 	}
-
-	reservation, err := config.ReservationRepository.FindByID(id)
-	if err != nil {
-		render.Render(w, r, errors.ErrServerError(err))
-		return nil, false
-	}
-	if reservation == nil {
-		render.Render(w, r, errors.ErrNotFound())
-		return nil, false
+	if reservation.UserID == user.ID {
+		return reservation, true
 	}
 
-	allowed, err := config.canView(user, reservation)
+	allowed, err := config.canActOnRamble(user, reservation.RambleID, permissions.blanket, permissions.self)
 	if err != nil {
 		render.Render(w, r, errors.ErrServerError(err))
 		return nil, false
@@ -218,17 +218,44 @@ func (config *Config) reservationToModify(w http.ResponseWriter, r *http.Request
 // bookerReservation returns the reservation of the request when the user is
 // its booker, and renders the error otherwise.
 func (config *Config) bookerReservation(w http.ResponseWriter, r *http.Request) (*dbmodel.Reservation, bool) {
-	reservation, ok := config.reservationToModify(w, r)
+	user, reservation, ok := config.requestReservation(w, r)
 	if !ok {
 		return nil, false
 	}
 
-	if reservation.UserID != authentication.ForContext(r.Context()).ID {
+	if reservation.UserID != user.ID {
 		render.Render(w, r, errors.ErrForbidden("only the booker can do this"))
 		return nil, false
 	}
 
 	return reservation, true
+}
+
+// requestReservation returns the authenticated user and the reservation of the
+// request, and renders the error when there is none.
+func (config *Config) requestReservation(w http.ResponseWriter, r *http.Request) (*dbmodel.User, *dbmodel.Reservation, bool) {
+	user := authentication.ForContext(r.Context())
+	if user == nil {
+		render.Render(w, r, errors.ErrUnauthorized("authentication required"))
+		return nil, nil, false
+	}
+
+	id, ok := parseID(w, r, "id")
+	if !ok {
+		return nil, nil, false
+	}
+
+	reservation, err := config.ReservationRepository.FindByID(id)
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return nil, nil, false
+	}
+	if reservation == nil {
+		render.Render(w, r, errors.ErrNotFound())
+		return nil, nil, false
+	}
+
+	return user, reservation, true
 }
 
 // respondWithPayment renders the reservation as saved with, when it is

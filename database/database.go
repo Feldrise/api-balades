@@ -28,6 +28,8 @@ func Migrate(database *gorm.DB) {
 		&dbmodel.Payment{},
 	)
 
+	ensureCaseInsensitiveUserEmails(database)
+
 	log.Println("Database migrated")
 
 	ApplySeeds(database)
@@ -75,4 +77,22 @@ func isSeedApplied(database *gorm.DB, name string) bool {
 
 func markSeedAsApplied(database *gorm.DB, name string) {
 	database.Create(&seed.Seed{Name: name})
+}
+
+// ensureCaseInsensitiveUserEmails makes the email of the accounts unique whatever
+// its case, as they are looked up. The index is not created while accounts share
+// an email in different cases, which must then be merged by hand.
+func ensureCaseInsensitiveUserEmails(database *gorm.DB) {
+	var duplicates []string
+	if err := database.Raw("SELECT LOWER(email) FROM users GROUP BY LOWER(email) HAVING COUNT(*) > 1").Scan(&duplicates).Error; err != nil {
+		log.Fatalf("Error checking user emails: %s", err)
+	}
+	if len(duplicates) > 0 {
+		log.Printf("Accounts share an email in different cases, case-insensitive uniqueness not enforced: %v", duplicates)
+		return
+	}
+
+	if err := database.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower ON users (LOWER(email))").Error; err != nil {
+		log.Fatalf("Error creating case-insensitive index on user emails: %s", err)
+	}
 }

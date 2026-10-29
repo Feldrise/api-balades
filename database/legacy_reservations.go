@@ -214,7 +214,7 @@ func findOrCreateLegacyBooker(tx *gorm.DB, email string, registration dbmodel.Ra
 		}
 	}
 
-	err := tx.Where("email = ?", email).First(&user).Error
+	err := tx.Where("LOWER(email) = LOWER(?)", email).Order("id ASC").First(&user).Error
 	if err == nil {
 		return &user, nil
 	}

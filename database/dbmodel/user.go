@@ -102,6 +102,7 @@ type UserFilter struct {
 
 type UserRepository interface {
 	FindByID(id uint, fieldsToInclude *UserFieldsToInclude) (*User, error)
+	// FindByEmail finds the account of email, whatever its case.
 	FindByEmail(email string, fieldsToInclude *UserFieldsToInclude) (*User, error)
 	Search(filter *UserFilter) ([]User, error)
 	Create(user *User) (*User, error)
@@ -207,7 +208,7 @@ func (r *userRepository) FindByEmail(email string, fieldsToInclude *UserFieldsTo
 		}
 	}
 
-	err := tx.Where("email = ?", email).First(&user).Error
+	err := tx.Where("LOWER(email) = LOWER(?)", email).Order("id ASC").First(&user).Error
 
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {

@@ -57,9 +57,10 @@ type Ramble struct {
 	Guides []Guide `gorm:"many2many:ramble_guides;"`
 
 	// Foreign Objects
-	Prices        []RamblePrice        `gorm:"foreignKey:RambleID;"`
-	Registrations []RambleRegistration `gorm:"foreignKey:RambleID;"`
-	PaymentGuide  *Guide               `gorm:"foreignKey:PaymentGuideID"`
+	Prices []RamblePrice `gorm:"foreignKey:RambleID;"`
+	// Reservations is loaded with the reservations taking places only.
+	Reservations []Reservation `gorm:"foreignKey:RambleID;"`
+	PaymentGuide *Guide        `gorm:"foreignKey:PaymentGuideID"`
 
 	// Computed fields (not stored in database)
 	PlacesLeft *int `gorm:"-"`
@@ -73,24 +74,47 @@ func (rm *Ramble) IsPublished() bool {
 	return !rm.PublishedAt.After(time.Now())
 }
 
-// CalculatePlacesLeft computes the number of available places for the ramble
-func (rm *Ramble) CalculatePlacesLeft() {
+// HasStarted reports whether the ramble has started at now. A ramble without
+// date has not started.
+func (rm *Ramble) HasStarted(now time.Time) bool {
+	return rm.Date != nil && !now.Before(*rm.Date)
+}
+
+// UnlimitedRambleMaxParticipantsPerReservation is the safeguard on the number of
+// participants of a reservation when the ramble has no capacity.
+const UnlimitedRambleMaxParticipantsPerReservation = 20
+
+// MaxParticipantsPerReservation is the ramble's capacity, or a safeguard when it is unlimited.
+func (rm *Ramble) MaxParticipantsPerReservation() int {
 	if rm.MaxParticipants == nil {
-		rm.PlacesLeft = nil // Unlimited places
-		return
+		return UnlimitedRambleMaxParticipantsPerReservation
+	}
+	return *rm.MaxParticipants
+}
+
+// PlacesLeftFor returns the places left given the ramble's reservations, nil when unlimited.
+func (rm *Ramble) PlacesLeftFor(reservations []Reservation) *int {
+	if rm.MaxParticipants == nil {
+		return nil
 	}
 
-	reservationCount := 0
-	for _, registration := range rm.Registrations {
-		if registration.Status != "cancelled" {
-			reservationCount++
-		}
-	}
+	placesLeft := *rm.MaxParticipants - OccupiedPlaces(reservations)
+	return &placesLeft
+}
 
-	placesLeft := *rm.MaxParticipants - reservationCount
+// CalculatePlacesLeft computes the number of available places for the ramble
+// from its loaded reservations.
+func (rm *Ramble) CalculatePlacesLeft() {
+	placesLeft := rm.PlacesLeftFor(rm.Reservations)
 
-	// We keep the negative value to indicate waitlist status
-	rm.PlacesLeft = &placesLeft
+	// We keep a negative value (capacity lowered below the occupied places)
+	rm.PlacesLeft = placesLeft
+}
+
+func preloadPlacesTaken(tx *gorm.DB) *gorm.DB {
+	return tx.
+		Preload("Reservations", "status IN ?", []string{ReservationStatusPending, ReservationStatusConfirmed}).
+		Preload("Reservations.Participants")
 }
 
 func (rm Ramble) ToModel() model.Ramble {
@@ -141,6 +165,8 @@ func (rm Ramble) ToModel() model.Ramble {
 		PaymentRequired:        rm.PaymentRequired,
 	}
 
+	rambleModel.MaxParticipantsPerReservation = rm.MaxParticipantsPerReservation()
+
 	if rm.PaymentGuide != nil {
 		paymentGuide := rm.PaymentGuide.ToModel()
 		rambleModel.PaymentGuide = &paymentGuide
@@ -150,15 +176,15 @@ func (rm Ramble) ToModel() model.Ramble {
 }
 
 type RambleFilter struct {
-	IsCancelled *bool // Filter by cancellation status
-	Type        *string
-	Difficulty  *string
-	Location    *string
-	Search      *string    // Search in title, description, location
-	DateFrom    *time.Time // Filter rambles from this date
-	DateTo      *time.Time // Filter rambles to this date
-	GuideID             *uint // Filter rambles by specific guide
-	IncludeUnpublished  bool  // When false, only return publicly visible rambles
+	IsCancelled        *bool // Filter by cancellation status
+	Type               *string
+	Difficulty         *string
+	Location           *string
+	Search             *string    // Search in title, description, location
+	DateFrom           *time.Time // Filter rambles from this date
+	DateTo             *time.Time // Filter rambles to this date
+	GuideID            *uint      // Filter rambles by specific guide
+	IncludeUnpublished bool       // When false, only return publicly visible rambles
 }
 
 type RambleRepository interface {
@@ -192,7 +218,8 @@ func (r *rambleRepository) FindByID(id uint, includeUnpublished bool) (*Ramble, 
 	tx := r.db.WithContext(ctx).Model(&ramble)
 	tx = applyPublishedFilter(tx, includeUnpublished)
 
-	tx = tx.Preload("Prices").Preload("Guides").Preload("Registrations").Preload("PaymentGuide")
+	tx = tx.Preload("Prices").Preload("Guides").Preload("PaymentGuide")
+	tx = preloadPlacesTaken(tx)
 
 	err := tx.First(&ramble, id).Error
 
@@ -255,7 +282,8 @@ func (r *rambleRepository) FindAll(filter *RambleFilter) ([]Ramble, error) {
 		}
 	}
 
-	tx = tx.Preload("Prices").Preload("Guides").Preload("Registrations").Preload("PaymentGuide")
+	tx = tx.Preload("Prices").Preload("Guides").Preload("PaymentGuide")
+	tx = preloadPlacesTaken(tx)
 
 	err := tx.Find(&rambles).Error
 

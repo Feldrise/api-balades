@@ -1,0 +1,99 @@
+package reservation
+
+import (
+	"fmt"
+	"log"
+	"strings"
+	"time"
+
+	"feldrise.com/balade/database/dbmodel"
+	"feldrise.com/balade/pkg/notifications/email"
+)
+
+// Changes told by the reservation summary email.
+const (
+	changeNone                = ""
+	changeParticipantsAdded   = "participants_added"
+	changeParticipantsRemoved = "participants_removed"
+	changePromoted            = "promoted"
+	changeStatusUpdated       = "status_updated"
+)
+
+var emailSubjects = map[string]string{
+	changeNone:                "Confirmation de réservation - Balade Écologique",
+	changeParticipantsAdded:   "Participants ajoutés à votre réservation - Balade Écologique",
+	changeParticipantsRemoved: "Participants retirés de votre réservation - Balade Écologique",
+	changePromoted:            "Place disponible - Balade Écologique",
+	changeStatusUpdated:       "Votre réservation a été mise à jour - Balade Écologique",
+}
+
+// sendReservationConfirmationEmail sends the summary of a new reservation to the booker.
+func (config *Config) sendReservationConfirmationEmail(reservation *dbmodel.Reservation) {
+	config.sendReservationEmail(reservation, changeNone)
+}
+
+// sendReservationEmail sends the reservation summary, after change, to the
+// booker only. A failure is logged without failing the request.
+func (config *Config) sendReservationEmail(reservation *dbmodel.Reservation, change string) {
+	ramble := reservation.Ramble
+
+	participants := make([]email.ReservationParticipantInfo, len(reservation.Participants))
+	for i, participant := range reservation.Participants {
+		participants[i] = email.ReservationParticipantInfo{
+			Name:         participant.FirstName + " " + participant.LastName,
+			PriceLabel:   participant.PriceLabel,
+			Price:        formatEuros(ramble.PriceAmount(participant.PriceLabel)),
+			PriceMissing: ramble.PriceMissing(participant.PriceLabel),
+		}
+	}
+
+	data := email.ReservationConfirmationData{
+		Title:            ramble.Title,
+		Date:             formatDate(ramble.Date),
+		Location:         formatLocation(ramble.Location),
+		Status:           reservation.Status,
+		Change:           change,
+		Participants:     participants,
+		HasPrices:        len(ramble.Prices) > 0,
+		EstimatedAmount:  formatCents(reservation.EstimatedAmount()),
+		HasMissingPrices: reservation.HasMissingPrices(),
+		PaymentEnabled:   ramble.PaymentEnabled,
+		ReservationURL:   fmt.Sprintf("%s/mes-reservations/%d", config.ApplicationURL, reservation.ID),
+	}
+
+	err := config.EmailService.Send(
+		reservation.ContactEmail,
+		emailSubjects[change],
+		"reservation_confirmation",
+		data,
+	)
+	if err != nil {
+		log.Printf("Failed to send reservation email for reservation %d: %v", reservation.ID, err)
+	}
+}
+
+func formatEuros(amount float64) string {
+	return strings.Replace(fmt.Sprintf("%.2f €", amount), ".", ",", 1)
+}
+
+func formatCents(amount int64) string {
+	return formatEuros(float64(amount) / 100)
+}
+
+func formatDate(date *time.Time) string {
+	if date == nil {
+		return "Date à confirmer"
+	}
+	loc, err := time.LoadLocation("Europe/Paris")
+	if err != nil {
+		return date.Local().Format("2 January 2006 à 15:04")
+	}
+	return date.In(loc).Format("2 January 2006 à 15:04")
+}
+
+func formatLocation(location *string) string {
+	if location == nil {
+		return "Lieu à confirmer"
+	}
+	return *location
+}

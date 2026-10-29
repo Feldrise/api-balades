@@ -3,6 +3,7 @@ package ramble
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"feldrise.com/balade/pkg/authentication"
 	"feldrise.com/balade/pkg/errors"
 	"feldrise.com/balade/pkg/model"
+	"feldrise.com/balade/pkg/reservation"
 	"feldrise.com/balade/pkg/notifications/email"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/render"
@@ -407,6 +409,11 @@ func (config *Config) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A raised or removed capacity gives places to the waiting list.
+	if err := reservation.New(config.Config).AdmitWaitingList(dbRamble.ID); err != nil {
+		log.Printf("Failed to admit the waiting list of ramble %d: %v", dbRamble.ID, err)
+	}
+
 	render.JSON(w, r, dbRamble.ToModel())
 }
 
@@ -642,38 +649,52 @@ func (config *Config) Cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Send cancellation emails to all registered participants
+	config.cancelPendingPayments(dbRamble)
+
+	// Tell the bookers of the active reservations
 	go config.sendCancellationEmails(dbRamble)
 
 	render.JSON(w, r, dbRamble.ToModel())
 }
 
-// sendCancellationEmails sends cancellation notifications to all registered participants
-func (config *Config) sendCancellationEmails(ramble *dbmodel.Ramble) {
-	// Get all active registrations for this ramble
-	filter := &dbmodel.RambleRegistrationFilter{
-		RambleID: &ramble.ID,
-	}
-
-	registrations, err := config.RambleRegistrationRepository.FindAll(filter)
+// cancelPendingPayments cancels the payments of the ramble's reservations not
+// paid yet, so that they can no longer be paid. A failure is logged only.
+func (config *Config) cancelPendingPayments(ramble *dbmodel.Ramble) {
+	reservations, err := config.ReservationRepository.FindAll(&dbmodel.ReservationFilter{RambleID: &ramble.ID})
 	if err != nil {
-		fmt.Printf("Failed to get registrations for cancellation emails: %v\n", err)
+		log.Printf("Failed to get reservations to cancel their payments: %v", err)
 		return
 	}
 
-	// Send email to each registered participant (excluding already cancelled ones)
-	for _, registration := range registrations {
-		if registration.Status != "cancelled" {
-			config.sendCancellationEmail(&registration, ramble)
+	for i := range reservations {
+		if err := config.PaymentService.CancelObsoletePayments(&reservations[i]); err != nil {
+			log.Printf("Failed to cancel the pending payments of reservation %d: %v", reservations[i].ID, err)
 		}
 	}
 }
 
-// sendCancellationEmail sends a cancellation email to a single participant
-func (config *Config) sendCancellationEmail(registration *dbmodel.RambleRegistration, ramble *dbmodel.Ramble) {
+// sendCancellationEmails tells the booker of each reservation of the ramble that is not cancelled
+func (config *Config) sendCancellationEmails(ramble *dbmodel.Ramble) {
+	reservations, err := config.ReservationRepository.FindAll(&dbmodel.ReservationFilter{
+		RambleID: &ramble.ID,
+		Statuses: []string{dbmodel.ReservationStatusPending, dbmodel.ReservationStatusConfirmed, dbmodel.ReservationStatusWaitingList},
+	})
+	if err != nil {
+		fmt.Printf("Failed to get reservations for cancellation emails: %v\n", err)
+		return
+	}
+
+	for i := range reservations {
+		config.sendCancellationEmail(&reservations[i], ramble)
+	}
+}
+
+// sendCancellationEmail sends a cancellation email to the booker of a reservation
+func (config *Config) sendCancellationEmail(reservation *dbmodel.Reservation, ramble *dbmodel.Ramble) {
+	firstName, lastName := reservation.BookerName()
 	data := email.RambleCancellationData{
-		FirstName:          registration.FirstName,
-		LastName:           registration.LastName,
+		FirstName:          firstName,
+		LastName:           lastName,
 		Title:              ramble.Title,
 		Date:               formatDate(ramble.Date),
 		Location:           formatLocation(ramble.Location),
@@ -681,16 +702,16 @@ func (config *Config) sendCancellationEmail(registration *dbmodel.RambleRegistra
 	}
 
 	err := config.EmailService.Send(
-		registration.Email,
+		reservation.ContactEmail,
 		"Annulation de balade - Balade Écologique",
 		"ramble_cancellation",
 		data,
 	)
 
 	if err != nil {
-		fmt.Printf("Failed to send cancellation email to %s: %v\n", registration.Email, err)
+		fmt.Printf("Failed to send cancellation email to %s: %v\n", reservation.ContactEmail, err)
 	} else {
-		fmt.Printf("Sent cancellation email to %s for ramble: %s\n", registration.Email, ramble.Title)
+		fmt.Printf("Sent cancellation email to %s for ramble: %s\n", reservation.ContactEmail, ramble.Title)
 	}
 }
 

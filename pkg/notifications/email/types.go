@@ -8,26 +8,34 @@ type AuthenticationData struct {
 	Code string
 }
 
-type RegistrationConfirmationData struct {
-	FirstName        string
-	LastName         string
-	Title            string
-	Date             string
-	Location         string
-	Status           string
-	IsGroup          bool
-	ParticipantCount int
-	ParticipantNames []string
-	// Payment information
-	PaymentEnabled  bool
-	PaymentRequired bool
-	PaymentURL      string
-	Prices          []PriceInfo
+type ReservationConfirmationData struct {
+	Title    string
+	Date     string
+	Location string
+	// Status is pending, confirmed, waiting_list or cancelled.
+	Status string
+	// Change is empty for a new reservation, or participants_added,
+	// participants_removed, promoted (left the waiting list) or status_updated
+	// (set by an admin).
+	Change       string
+	Participants []ReservationParticipantInfo
+	// HasPrices tells whether the ramble has prices, so an estimated amount.
+	HasPrices bool
+	// EstimatedAmount is formatted, e.g. "18,50 €", and sums the known prices.
+	EstimatedAmount string
+	// HasMissingPrices tells that a participant's price is unknown.
+	HasMissingPrices bool
+	PaymentEnabled   bool
+	ReservationURL   string
 }
 
-type PriceInfo struct {
-	Label  string
-	Amount float64
+type ReservationParticipantInfo struct {
+	Name       string
+	PriceLabel string
+	// Price is formatted, e.g. "12,50 €".
+	Price string
+	// PriceMissing tells that the ramble has prices but the participant's is unknown.
+	PriceMissing bool
 }
 
 type EventConfirmationRequestData struct {
@@ -38,14 +46,6 @@ type EventConfirmationRequestData struct {
 	Location             string
 	ConfirmationDeadline string
 	ReservationURL       string
-}
-
-type SpotAvailableData struct {
-	FirstName string
-	LastName  string
-	Title     string
-	Date      string
-	Location  string
 }
 
 type RambleCancellationData struct {

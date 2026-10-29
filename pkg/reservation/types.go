@@ -1,4 +1,4 @@
-package registration
+package reservation
 
 import "feldrise.com/balade/config"
 

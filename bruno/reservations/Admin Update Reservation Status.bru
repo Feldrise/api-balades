@@ -1,0 +1,33 @@
+meta {
+  name: Admin Update Reservation Status
+  type: http
+  seq: 10
+}
+
+put {
+  url: {{base_url}}/reservations/admin/{{reservation_id}}/status
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+body:json {
+  {
+    "status": "confirmed",
+    "reason": "Confirmed by guide",
+    "send_email": true
+  }
+}
+
+docs {
+  Status values: `pending`, `confirmed`, `waiting_list`, `cancelled`. The reservation is never split: bringing it back to `pending` or `confirmed` from waiting list or cancelled is refused with 409 `not_enough_places` when its participants do not fit in the places left, and the places released by `waiting_list` or `cancelled` go to the waiting list.
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

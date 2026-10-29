@@ -1,6 +1,7 @@
 package payment
 
 import (
+	stderrors "errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,81 +10,73 @@ import (
 	"github.com/go-chi/chi"
 	"github.com/go-chi/render"
 
+	"feldrise.com/balade/config"
+	"feldrise.com/balade/database/dbmodel"
+	"feldrise.com/balade/pkg/authentication"
 	"feldrise.com/balade/pkg/errors"
 	"feldrise.com/balade/pkg/model"
 	"feldrise.com/balade/pkg/payments"
 )
 
-type PayerInfo struct {
-	Email string
-	Name  string
-}
-
 type Controller struct {
-	paymentService payments.PaymentService
+	paymentService        payments.PaymentService
+	reservationRepository dbmodel.ReservationRepository
+	guideRepository       dbmodel.GuideRepository
 }
 
-func NewController(paymentService payments.PaymentService) *Controller {
+func NewController(configuration *config.Config) *Controller {
 	return &Controller{
-		paymentService: paymentService,
+		paymentService:        configuration.PaymentService,
+		reservationRepository: configuration.ReservationRepository,
+		guideRepository:       configuration.GuideRepository,
 	}
 }
 
-// CreatePayment creates a new payment intent for a registration or group
-// @Summary Create payment intent
-// @Description Create a new payment intent for a registration or group
-// @Tags payments
-// @Accept json
-// @Produce json
-// @Param payload body model.PaymentCreatePayload true "Payment creation payload"
-// @Success 200 {object} model.PaymentResponse
-// @Failure 400 {object} errors.ErrResponse
-// @Failure 500 {object} errors.ErrResponse
-// @Router /payments [post]
-func (pc *Controller) CreatePayment(w http.ResponseWriter, r *http.Request) {
-	var payload model.PaymentCreatePayload
-	if err := render.Bind(r, &payload); err != nil {
-		render.Render(w, r, errors.ErrInvalidRequest(err))
-		return
+// canView reports whether user may read the payment: the booker of its
+// reservation, an admin or guide allowed to view the registrations of the
+// reservation's ramble, or staff allowed to view every payment.
+func (pc *Controller) canView(user *dbmodel.User, payment *model.Payment) (bool, error) {
+	if user.HasPermission("view:payments") || user.HasPermission("manage:payments") {
+		return true, nil
+	}
+	if payment.ReservationID == nil {
+		return false, nil
 	}
 
-	payerInfo := payments.PayerInfo{
-		Email: payload.PayerEmail,
-		Name:  payload.PayerName,
+	reservation, err := pc.reservationRepository.FindByID(*payment.ReservationID)
+	if err != nil || reservation == nil {
+		return false, err
 	}
 
-	var response *model.PaymentResponse
-	var err error
-
-	if payload.RegistrationID != nil {
-		response, err = pc.paymentService.CreatePaymentForRegistration(*payload.RegistrationID, payload.PriceLabel, payerInfo, payload.ReturnURL)
-	} else if payload.GroupID != nil {
-		response, err = pc.paymentService.CreatePaymentForGroup(*payload.GroupID, payload.PriceLabel, payerInfo, payload.ReturnURL, payload.PriceSelections)
-	} else {
-		render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("either registration_id or group_id is required")))
-		return
+	if reservation.UserID == user.ID || user.HasPermission("view:all-registrations") {
+		return true, nil
 	}
-
-	if err != nil {
-		render.Render(w, r, errors.ErrServerError(err))
-		return
+	if user.HasPermission("view:registrations:self") {
+		return pc.guideRepository.UserOwnsRamble(user.ID, reservation.RambleID)
 	}
-
-	render.JSON(w, r, response)
+	return false, nil
 }
 
 // GetPayment retrieves a payment by ID
 // @Summary Get payment by ID
-// @Description Get payment details by ID
+// @Description Get payment details by ID, for the booker of its reservation or authorized staff
 // @Tags payments
 // @Produce json
 // @Param id path int true "Payment ID"
 // @Success 200 {object} model.Payment
 // @Failure 400 {object} errors.ErrResponse
+// @Failure 401 {object} errors.ErrResponse
+// @Failure 403 {object} errors.ErrResponse
 // @Failure 404 {object} errors.ErrResponse
 // @Failure 500 {object} errors.ErrResponse
 // @Router /payments/{id} [get]
 func (pc *Controller) GetPayment(w http.ResponseWriter, r *http.Request) {
+	user := authentication.ForContext(r.Context())
+	if user == nil {
+		render.Render(w, r, errors.ErrUnauthorized("authentication required"))
+		return
+	}
+
 	idStr := chi.URLParam(r, "id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -102,20 +95,34 @@ func (pc *Controller) GetPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	allowed, err := pc.canView(user, payment)
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return
+	}
+	if !allowed {
+		render.Render(w, r, errors.ErrForbidden("insufficient permissions"))
+		return
+	}
+
 	render.JSON(w, r, payment)
 }
 
 // RefundPayment processes a refund for a payment
 // @Summary Refund payment
-// @Description Process a refund for a payment
+// @Description Process a refund for a payment (refund:payments or manage:payments)
 // @Tags payments
 // @Accept json
 // @Produce json
 // @Param id path int true "Payment ID"
 // @Param payload body model.PaymentRefundPayload true "Refund payload"
 // @Success 200 {object} map[string]string
-// @Failure 400 {object} errors.ErrResponse
+// @Failure 400 {object} errors.ErrResponse "reason: invalid_refund_amount (an amount below 1 cent)"
+// @Failure 401 {object} errors.ErrResponse
+// @Failure 403 {object} errors.ErrResponse
 // @Failure 404 {object} errors.ErrResponse
+// @Failure 409 {object} errors.ErrResponse "reason: refund_exceeds_refundable (more than is left to refund, nothing refunded), payment_not_refundable (the payment is not succeeded)"
+// @Failure 422 {object} errors.ErrResponse "reason: refund_refused (Stripe refused the refund, nothing refunded)"
 // @Failure 500 {object} errors.ErrResponse
 // @Router /payments/{id}/refund [post]
 func (pc *Controller) RefundPayment(w http.ResponseWriter, r *http.Request) {
@@ -134,11 +141,26 @@ func (pc *Controller) RefundPayment(w http.ResponseWriter, r *http.Request) {
 
 	err = pc.paymentService.RefundPayment(uint(id), payload.Amount, payload.Reason)
 	if err != nil {
-		render.Render(w, r, errors.ErrServerError(err))
+		render.Render(w, r, refundError(err))
 		return
 	}
 
 	render.JSON(w, r, map[string]string{"message": "Refund processed successfully"})
+}
+
+// refundError reports a refund refused with the reason why.
+func refundError(err error) render.Renderer {
+	switch {
+	case stderrors.Is(err, payments.ErrInvalidRefundAmount):
+		return errors.ErrBusiness(http.StatusBadRequest, "invalid_refund_amount", err.Error())
+	case stderrors.Is(err, payments.ErrRefundExceedsRefundable):
+		return errors.ErrBusiness(http.StatusConflict, "refund_exceeds_refundable", err.Error())
+	case stderrors.Is(err, payments.ErrPaymentNotRefundable):
+		return errors.ErrBusiness(http.StatusConflict, "payment_not_refundable", err.Error())
+	case stderrors.Is(err, payments.ErrRefundRefused):
+		return errors.ErrBusiness(http.StatusUnprocessableEntity, "refund_refused", err.Error())
+	}
+	return errors.ErrServerError(err)
 }
 
 // WebhookHandler handles Stripe webhook events
@@ -189,58 +211,4 @@ func (pc *Controller) WebhookHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	render.JSON(w, r, map[string]string{"message": "Webhook processed successfully"})
-}
-
-// GetRegistrationPayments gets all payments for a registration
-// @Summary Get payments for registration
-// @Description Get all payments associated with a registration
-// @Tags payments
-// @Produce json
-// @Param registration_id path int true "Registration ID"
-// @Success 200 {array} model.Payment
-// @Failure 400 {object} errors.ErrResponse
-// @Failure 500 {object} errors.ErrResponse
-// @Router /registrations/{registration_id}/payments [get]
-func (pc *Controller) GetRegistrationPayments(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "registration_id")
-	id, err := strconv.ParseUint(idStr, 10, 32)
-	if err != nil {
-		render.Render(w, r, errors.ErrInvalidRequest(err))
-		return
-	}
-
-	payments, err := pc.paymentService.GetPaymentsByRegistration(uint(id))
-	if err != nil {
-		render.Render(w, r, errors.ErrServerError(err))
-		return
-	}
-
-	render.JSON(w, r, payments)
-}
-
-// GetGroupPayments gets all payments for a group
-// @Summary Get payments for group
-// @Description Get all payments associated with a group
-// @Tags payments
-// @Produce json
-// @Param group_id path int true "Group ID"
-// @Success 200 {array} model.Payment
-// @Failure 400 {object} errors.ErrResponse
-// @Failure 500 {object} errors.ErrResponse
-// @Router /groups/{group_id}/payments [get]
-func (pc *Controller) GetGroupPayments(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "group_id")
-	id, err := strconv.ParseUint(idStr, 10, 32)
-	if err != nil {
-		render.Render(w, r, errors.ErrInvalidRequest(err))
-		return
-	}
-
-	payments, err := pc.paymentService.GetPaymentsByGroup(uint(id))
-	if err != nil {
-		render.Render(w, r, errors.ErrServerError(err))
-		return
-	}
-
-	render.JSON(w, r, payments)
 }

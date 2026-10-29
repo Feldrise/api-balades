@@ -1,0 +1,32 @@
+meta {
+  name: Admin Update Participant
+  type: http
+  seq: 13
+}
+
+put {
+  url: {{base_url}}/reservations/admin/{{reservation_id}}/participants/{{participant_id}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+body:json {
+  {
+    "first_name": "Zoé",
+    "price_label": "Adulte"
+  }
+}
+
+docs {
+  Corrects the name or the price of a participant. The omitted fields are kept. Once a payment succeeded, the price is frozen (409 `reservation_paid`) but the name can still be corrected.
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

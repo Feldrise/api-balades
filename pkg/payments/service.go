@@ -1,30 +1,69 @@
 package payments
 
 import (
+	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"feldrise.com/balade/database/dbmodel"
+	"feldrise.com/balade/pkg/clock"
 	"feldrise.com/balade/pkg/model"
 	"feldrise.com/balade/pkg/payments/stripe"
 	"feldrise.com/balade/pkg/security"
+	stripego "github.com/stripe/stripe-go/v83"
 )
 
 type PaymentService interface {
-	CreatePaymentForRegistration(registrationID uint, priceLabel string, payerInfo PayerInfo, returnURL string) (*model.PaymentResponse, error)
-	CreatePaymentForGroup(groupID uint, priceLabel string, payerInfo PayerInfo, returnURL string, priceSelections []model.PriceSelection) (*model.PaymentResponse, error)
+	// CreatePaymentForReservation creates the payment of the amount due by the
+	// reservation, as it is once locked: the payments of a reservation are
+	// decided one at a time. It fails with one of the errors above when the
+	// reservation, once locked, cannot be paid. It gives back the pending
+	// payment of the same amount to the same guide, if any, rather than
+	// creating another one, and cancels every other open payment.
+	CreatePaymentForReservation(reservation *dbmodel.Reservation, payerInfo PayerInfo) (*model.PaymentResponse, error)
+	// CancelObsoletePayments reconciles the open payments of the reservation,
+	// as it is once locked: it cancels, on Stripe too, every open payment but
+	// the single one it may still pay (payable, of the amount due, to the guide
+	// of the ramble), so that the others cannot be paid.
+	CancelObsoletePayments(reservation *dbmodel.Reservation) error
+	// ReconcileObsoletePayments is CancelObsoletePayments for a reconciliation
+	// in the background: it skips the reservation while an operation of the
+	// user holds it, and gives up early on a slow Stripe, so that it never
+	// makes the user wait. The next reconciliation catches up.
+	ReconcileObsoletePayments(reservation *dbmodel.Reservation) error
 	ProcessPaymentSuccess(paymentIntentID string) error
 	ProcessPaymentFailure(paymentIntentID string, failureReason ...string) error
 	RefundPayment(paymentID uint, amount *int64, reason *string) error
 	GetPaymentByID(id uint) (*model.Payment, error)
-	GetPaymentsByRegistration(registrationID uint) ([]model.Payment, error)
-	GetPaymentsByGroup(groupID uint) ([]model.Payment, error)
 	VerifyWebhookAndProcess(payload []byte, signature string, guideID uint) error
 }
+
+// Errors telling why the reservation, as it is once locked, cannot be paid.
+var (
+	ErrReservationCancelled    = errors.New("the reservation is cancelled")
+	ErrReservationWaitingList  = errors.New("the reservation is in the waiting list")
+	ErrReservationNotConfirmed = errors.New("the reservation is not confirmed")
+	ErrRambleCancelled         = errors.New("the ramble is cancelled")
+	ErrRambleStarted           = errors.New("payment is closed once the ramble has started")
+	ErrMissingPrices           = errors.New("the price of every participant must be specified first")
+	ErrNothingToPay            = errors.New("nothing to pay for this reservation")
+)
+
+// Errors telling why the payment, as it is once locked, cannot be refunded as
+// requested. Nothing was refunded.
+var (
+	ErrInvalidRefundAmount     = errors.New("the refund must be of at least 1 cent")
+	ErrPaymentNotRefundable    = errors.New("only a succeeded payment can be refunded")
+	ErrRefundExceedsRefundable = errors.New("the refund is greater than is left to refund")
+	ErrRefundRefused           = errors.New("stripe refused the refund")
+)
 
 type PayerInfo struct {
 	Email string
@@ -32,128 +71,121 @@ type PayerInfo struct {
 }
 
 type paymentService struct {
-	paymentRepo           dbmodel.PaymentRepository
-	registrationRepo      dbmodel.RambleRegistrationRepository
-	registrationGroupRepo dbmodel.RambleRegistrationGroupRepository
-	rambleRepo            dbmodel.RambleRepository
-	guideRepo             dbmodel.GuideRepository
-	stripeService         stripe.StripeService
-	encryptionService     security.EncryptionService
+	paymentRepo       dbmodel.PaymentRepository
+	rambleRepo        dbmodel.RambleRepository
+	guideRepo         dbmodel.GuideRepository
+	stripeService     stripe.StripeService
+	encryptionService security.EncryptionService
+	clock             clock.Clock
 }
 
 func NewPaymentService(
 	paymentRepo dbmodel.PaymentRepository,
-	registrationRepo dbmodel.RambleRegistrationRepository,
-	registrationGroupRepo dbmodel.RambleRegistrationGroupRepository,
 	rambleRepo dbmodel.RambleRepository,
 	guideRepo dbmodel.GuideRepository,
 	stripeService stripe.StripeService,
 	encryptionService security.EncryptionService,
+	clock clock.Clock,
 ) PaymentService {
 	return &paymentService{
-		paymentRepo:           paymentRepo,
-		registrationRepo:      registrationRepo,
-		registrationGroupRepo: registrationGroupRepo,
-		rambleRepo:            rambleRepo,
-		guideRepo:             guideRepo,
-		stripeService:         stripeService,
-		encryptionService:     encryptionService,
+		paymentRepo:       paymentRepo,
+		rambleRepo:        rambleRepo,
+		guideRepo:         guideRepo,
+		stripeService:     stripeService,
+		encryptionService: encryptionService,
+		clock:             clock,
 	}
 }
 
-func (s *paymentService) CreatePaymentForRegistration(registrationID uint, priceLabel string, payerInfo PayerInfo, returnURL string) (*model.PaymentResponse, error) {
-	// Get registration
-	registration, err := s.registrationRepo.FindByID(registrationID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find registration: %w", err)
-	}
-	if registration == nil {
-		return nil, errors.New("registration not found")
-	}
+func (s *paymentService) CreatePaymentForReservation(reservation *dbmodel.Reservation, payerInfo PayerInfo) (*model.PaymentResponse, error) {
+	var response *model.PaymentResponse
+	err := s.paymentRepo.ForReservation(reservation.ID, func(ctx context.Context, payments dbmodel.PaymentRepository, locked *dbmodel.Reservation) error {
+		var err error
+		response, err = s.createPayment(ctx, payments, locked, payerInfo)
+		return err
+	})
+	return response, err
+}
 
-	// Get ramble
-	ramble, err := s.rambleRepo.FindByID(registration.RambleID, true)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find ramble: %w", err)
+// createPayment gives the payment of the amount due by the reservation, locked.
+func (s *paymentService) createPayment(ctx context.Context, payments dbmodel.PaymentRepository, reservation *dbmodel.Reservation, payerInfo PayerInfo) (*model.PaymentResponse, error) {
+	if err := s.checkPayable(reservation); err != nil {
+		return nil, err
 	}
-	if ramble == nil {
-		return nil, errors.New("ramble not found")
-	}
-
-	// Check if payment is enabled for this ramble
+	ramble := &reservation.Ramble
 	if !ramble.PaymentEnabled {
 		return nil, errors.New("payment is not enabled for this ramble")
 	}
+	amountCents := reservation.AmountDue()
 
-	// Find the price
-	var selectedPrice *dbmodel.RamblePrice
-	for _, price := range ramble.Prices {
-		if price.Label == priceLabel {
-			selectedPrice = &price
-			break
-		}
-	}
-	if selectedPrice == nil {
-		return nil, errors.New("price not found")
-	}
-
-	// Get payment guide
 	guide, err := s.getPaymentGuide(ramble)
 	if err != nil {
 		return nil, err
 	}
 
-	// Check if payment already exists for this registration
-	existingPayments, err := s.paymentRepo.FindByRegistrationID(registrationID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check existing payments: %w", err)
-	}
-	for _, payment := range existingPayments {
-		if payment.Status == "succeeded" {
-			return nil, errors.New("payment already exists for this registration")
-		}
-	}
-
-	// Convert amount to cents
-	amountCents := int64(selectedPrice.Amount * 100)
-
-	// Get guide credentials
 	credentials, err := s.getGuideCredentials(guide)
 	if err != nil {
 		return nil, err
 	}
 
-	// Create payment intent
+	if err := s.cancelObsoletePayments(ctx, payments, reservation, guide); err != nil {
+		return nil, err
+	}
+
+	if kept := keptPayment(reservation, guide); kept != nil {
+		paymentIntent, err := s.stripeService.RetrievePaymentIntent(ctx, credentials, kept.StripePaymentIntentID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to retrieve payment intent: %w", err)
+		}
+		switch paymentIntent.Status {
+		case stripego.PaymentIntentStatusCanceled:
+			// Cancelled on Stripe without the webhook being received.
+			kept.Status = "cancelled"
+			if err := payments.UpdateStatus(kept.ID, kept.Status); err != nil {
+				return nil, fmt.Errorf("failed to update payment: %w", err)
+			}
+		case stripego.PaymentIntentStatusSucceeded, stripego.PaymentIntentStatusProcessing:
+			return nil, errors.New("the payment is being collected, awaiting its confirmation by Stripe")
+		default:
+			kept.Guide = *guide
+			return &model.PaymentResponse{
+				Payment:        kept.ToModel(),
+				ClientSecret:   paymentIntent.ClientSecret,
+				PublishableKey: *guide.StripePublicKey,
+			}, nil
+		}
+	}
+
+	reservationID := reservation.ID
 	metadata := map[string]string{
-		"registration_id": strconv.FormatUint(uint64(registrationID), 10),
-		"ramble_id":       strconv.FormatUint(uint64(ramble.ID), 10),
-		"price_label":     priceLabel,
-		"payer_email":     payerInfo.Email,
-		"payer_name":      payerInfo.Name,
+		"reservation_id": strconv.FormatUint(uint64(reservationID), 10),
+		"ramble_id":      strconv.FormatUint(uint64(ramble.ID), 10),
+		"participants":   strconv.Itoa(len(reservation.Participants)),
+		"payer_email":    payerInfo.Email,
+		"payer_name":     payerInfo.Name,
 	}
 
-	paymentIntent, err := s.stripeService.CreatePaymentIntent(credentials, amountCents, "eur", metadata)
+	idempotencyKey := paymentIdempotencyKey(reservationID, len(reservation.Payments)+1, amountCents, "eur", metadata)
+	paymentIntent, err := s.stripeService.CreatePaymentIntent(ctx, credentials, amountCents, "eur", metadata, idempotencyKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create payment intent: %w", err)
 	}
 
-	// Create payment record
-	payment := &dbmodel.Payment{
+	payment, err := payments.Create(&dbmodel.Payment{
 		StripePaymentIntentID: paymentIntent.ID,
 		Amount:                amountCents,
 		Currency:              "eur",
 		Status:                "pending",
 		PaymentMethod:         "card",
-		RegistrationID:        &registrationID,
+		ReservationID:         &reservationID,
 		PayerEmail:            payerInfo.Email,
 		PayerName:             payerInfo.Name,
 		GuideID:               guide.ID,
-	}
-
-	payment, err = s.paymentRepo.Create(payment)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create payment record: %w", err)
 	}
+	payment.Guide = *guide
 
 	return &model.PaymentResponse{
 		Payment:        payment.ToModel(),
@@ -162,243 +194,358 @@ func (s *paymentService) CreatePaymentForRegistration(registrationID uint, price
 	}, nil
 }
 
-func (s *paymentService) CreatePaymentForGroup(groupID uint, priceLabel string, payerInfo PayerInfo, returnURL string, priceSelections []model.PriceSelection) (*model.PaymentResponse, error) {
-	// Get group
-	group, err := s.registrationGroupRepo.FindByID(groupID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find group: %w", err)
+// paymentIdempotencyKey is the idempotency key of the creation of a payment
+// intent. It changes with every payment recorded and with the parameters sent,
+// so that a retry after a failure to record the payment gives back the same
+// payment intent, and other parameters (amount due, payer...) a new one:
+// Stripe refuses a key reused with other parameters.
+func paymentIdempotencyKey(reservationID uint, paymentNumber int, amount int64, currency string, metadata map[string]string) string {
+	hash := sha256.New()
+	fmt.Fprintf(hash, "amount=%d\ncurrency=%s\n", amount, currency)
+	for _, key := range slices.Sorted(maps.Keys(metadata)) {
+		fmt.Fprintf(hash, "metadata[%q]=%q\n", key, metadata[key])
 	}
-	if group == nil {
-		return nil, errors.New("group not found")
-	}
-
-	// Get ramble
-	ramble, err := s.rambleRepo.FindByID(group.RambleID, true)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find ramble: %w", err)
-	}
-	if ramble == nil {
-		return nil, errors.New("ramble not found")
-	}
-
-	// Check if payment is enabled for this ramble
-	if !ramble.PaymentEnabled {
-		return nil, errors.New("payment is not enabled for this ramble")
-	}
-
-	// Get payment guide
-	guide, err := s.getPaymentGuide(ramble)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check if payment already exists for this group
-	existingPayments, err := s.paymentRepo.FindByGroupID(groupID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check existing payments: %w", err)
-	}
-	for _, payment := range existingPayments {
-		if payment.Status == "succeeded" {
-			return nil, errors.New("payment already exists for this group")
-		}
-	}
-
-	var amountCents int64
-	var metadata map[string]string
-
-	// Handle new price selections format or legacy single price
-	if len(priceSelections) > 0 {
-		// New format: multiple prices with quantities
-		priceBreakdown := make(map[string]int) // price_label -> quantity
-		totalAmount := 0.0
-
-		// Create a map of available prices for quick lookup
-		priceMap := make(map[string]*dbmodel.RamblePrice)
-		for i := range ramble.Prices {
-			priceMap[ramble.Prices[i].Label] = &ramble.Prices[i]
-		}
-
-		// Calculate total amount from all price selections
-		for _, selection := range priceSelections {
-			price, exists := priceMap[selection.PriceLabel]
-			if !exists {
-				return nil, fmt.Errorf("price '%s' not found for this ramble", selection.PriceLabel)
-			}
-			priceBreakdown[selection.PriceLabel] = selection.Quantity
-			totalAmount += price.Amount * float64(selection.Quantity)
-		}
-
-		amountCents = int64(totalAmount * 100)
-
-		// Build metadata with price breakdown
-		metadata = map[string]string{
-			"group_id":    strconv.FormatUint(uint64(groupID), 10),
-			"ramble_id":   strconv.FormatUint(uint64(ramble.ID), 10),
-			"payer_email": payerInfo.Email,
-			"payer_name":  payerInfo.Name,
-		}
-
-		// Add price breakdown to metadata
-		for label, qty := range priceBreakdown {
-			metadata["price_"+label] = strconv.Itoa(qty)
-		}
-	} else {
-		// Legacy format: single price label multiplied by participant count
-		var selectedPrice *dbmodel.RamblePrice
-		for i := range ramble.Prices {
-			if ramble.Prices[i].Label == priceLabel {
-				selectedPrice = &ramble.Prices[i]
-				break
-			}
-		}
-		if selectedPrice == nil {
-			return nil, errors.New("price not found")
-		}
-
-		// Calculate total amount (price * number of participants)
-		participantCount := len(group.Registrations)
-		if participantCount == 0 {
-			return nil, errors.New("no participants in group")
-		}
-
-		amountCents = int64(selectedPrice.Amount * float64(participantCount) * 100)
-
-		// Build metadata
-		metadata = map[string]string{
-			"group_id":          strconv.FormatUint(uint64(groupID), 10),
-			"ramble_id":         strconv.FormatUint(uint64(ramble.ID), 10),
-			"price_label":       priceLabel,
-			"participant_count": strconv.Itoa(participantCount),
-			"payer_email":       payerInfo.Email,
-			"payer_name":        payerInfo.Name,
-		}
-	}
-
-	// Get guide credentials
-	credentials, err := s.getGuideCredentials(guide)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create payment intent
-	paymentIntent, err := s.stripeService.CreatePaymentIntent(credentials, amountCents, "eur", metadata)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create payment intent: %w", err)
-	}
-
-	// Create payment record
-	payment := &dbmodel.Payment{
-		StripePaymentIntentID: paymentIntent.ID,
-		Amount:                amountCents,
-		Currency:              "eur",
-		Status:                "pending",
-		PaymentMethod:         "card",
-		GroupID:               &groupID,
-		PayerEmail:            payerInfo.Email,
-		PayerName:             payerInfo.Name,
-		GuideID:               guide.ID,
-	}
-
-	payment, err = s.paymentRepo.Create(payment)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create payment record: %w", err)
-	}
-
-	return &model.PaymentResponse{
-		Payment:        payment.ToModel(),
-		ClientSecret:   paymentIntent.ClientSecret,
-		PublishableKey: *guide.StripePublicKey,
-	}, nil
+	return fmt.Sprintf("reservation-%d-payment-%d-%x", reservationID, paymentNumber, hash.Sum(nil))
 }
 
-func (s *paymentService) ProcessPaymentSuccess(paymentIntentID string) error {
-	payment, err := s.paymentRepo.FindByStripePaymentIntentID(paymentIntentID)
-	if err != nil {
-		return fmt.Errorf("failed to find payment: %w", err)
-	}
-	if payment == nil {
-		return errors.New("payment not found")
-	}
-
-	// Update payment status
-	payment.Status = "succeeded"
-	now := time.Now()
-	payment.PaidAt = &now
-
-	_, err = s.paymentRepo.Update(payment)
-	if err != nil {
-		return fmt.Errorf("failed to update payment: %w", err)
-	}
-
-	return nil
+func (s *paymentService) CancelObsoletePayments(reservation *dbmodel.Reservation) error {
+	return s.paymentRepo.ForReservation(reservation.ID, s.cancelUnpayablePayments)
 }
 
-func (s *paymentService) ProcessPaymentFailure(paymentIntentID string, failureReason ...string) error {
-	payment, err := s.paymentRepo.FindByStripePaymentIntentID(paymentIntentID)
-	if err != nil {
-		return fmt.Errorf("failed to find payment: %w", err)
-	}
-	if payment == nil {
-		return errors.New("payment not found")
-	}
-
-	// Update payment status
-	payment.Status = "failed"
-
-	// Set failure reason if provided
-	if len(failureReason) > 0 && failureReason[0] != "" {
-		payment.FailureReason = &failureReason[0]
-	}
-
-	_, err = s.paymentRepo.Update(payment)
-	if err != nil {
-		return fmt.Errorf("failed to update payment: %w", err)
-	}
-
-	return nil
+func (s *paymentService) ReconcileObsoletePayments(reservation *dbmodel.Reservation) error {
+	return s.paymentRepo.ForIdleReservation(reservation.ID, s.cancelUnpayablePayments)
 }
 
-func (s *paymentService) RefundPayment(paymentID uint, amount *int64, reason *string) error {
-	payment, err := s.paymentRepo.FindByID(paymentID)
-	if err != nil {
-		return fmt.Errorf("failed to find payment: %w", err)
-	}
-	if payment == nil {
-		return errors.New("payment not found")
-	}
-
-	if payment.Status != "succeeded" {
-		return errors.New("can only refund succeeded payments")
-	}
-
-	// Get guide credentials
-	credentials, err := s.getGuideCredentials(&payment.Guide)
+// cancelUnpayablePayments cancels every open payment of the reservation,
+// locked, but the one it may still pay (see keptPayment).
+func (s *paymentService) cancelUnpayablePayments(ctx context.Context, payments dbmodel.PaymentRepository, reservation *dbmodel.Reservation) error {
+	guide, err := s.payableTo(reservation)
 	if err != nil {
 		return err
 	}
+	return s.cancelObsoletePayments(ctx, payments, reservation, guide)
+}
 
-	// Process refund with Stripe
-	_, err = s.stripeService.RefundPayment(credentials, payment.StripePaymentIntentID, amount)
+// payableTo returns the guide the reservation, locked, pays what it owes to,
+// nil when it cannot be paid.
+func (s *paymentService) payableTo(reservation *dbmodel.Reservation) (*dbmodel.Guide, error) {
+	ramble := &reservation.Ramble
+	if s.checkPayable(reservation) != nil || !ramble.PaymentEnabled || ramble.PaymentGuideID == nil {
+		return nil, nil
+	}
+	guide, err := s.guideRepo.FindByID(*ramble.PaymentGuideID)
 	if err != nil {
-		return fmt.Errorf("failed to process refund: %w", err)
+		return nil, fmt.Errorf("failed to find payment guide: %w", err)
 	}
-
-	// Update payment record
-	payment.Status = "refunded"
-	now := time.Now()
-	payment.RefundedAt = &now
-	if amount != nil {
-		payment.RefundAmount = amount
-	} else {
-		payment.RefundAmount = &payment.Amount
+	if guide == nil || !guide.PaymentEnabled {
+		return nil, nil
 	}
+	return guide, nil
+}
 
-	_, err = s.paymentRepo.Update(payment)
-	if err != nil {
-		return fmt.Errorf("failed to update payment record: %w", err)
+// keptPayment returns the single open payment the reservation, locked, may
+// still pay to guide: the first of the amount it owes to guide. It is nil when
+// guide is nil, the reservation being then not payable.
+func keptPayment(reservation *dbmodel.Reservation, guide *dbmodel.Guide) *dbmodel.Payment {
+	if guide == nil {
+		return nil
 	}
-
+	amountDue := reservation.AmountDue()
+	for i := range reservation.Payments {
+		open := &reservation.Payments[i]
+		if open.IsOpen() && open.Amount == amountDue && open.GuideID == guide.ID {
+			return open
+		}
+	}
 	return nil
+}
+
+// cancelObsoletePayments cancels every open payment of the reservation, locked,
+// but the one it may still pay to guide (see keptPayment), so that a single
+// payment can be paid at a time.
+func (s *paymentService) cancelObsoletePayments(ctx context.Context, payments dbmodel.PaymentRepository, reservation *dbmodel.Reservation, guide *dbmodel.Guide) error {
+	kept := keptPayment(reservation, guide)
+
+	for i := range reservation.Payments {
+		open := &reservation.Payments[i]
+		if !open.IsOpen() || open == kept {
+			continue
+		}
+
+		guide, err := s.guideRepo.FindByID(open.GuideID)
+		if err != nil {
+			return fmt.Errorf("failed to find payment guide: %w", err)
+		}
+		if guide == nil {
+			return errors.New("payment guide not found")
+		}
+		credentials, err := s.getGuideCredentials(guide)
+		if err != nil {
+			return err
+		}
+		if err := s.stripeService.CancelPaymentIntent(ctx, credentials, open.StripePaymentIntentID); err != nil {
+			// Stripe refuses to cancel a payment intent cancelled already.
+			paymentIntent, retrieveErr := s.stripeService.RetrievePaymentIntent(ctx, credentials, open.StripePaymentIntentID)
+			if retrieveErr != nil || paymentIntent.Status != stripego.PaymentIntentStatusCanceled {
+				return fmt.Errorf("failed to cancel obsolete payment %d: %w", open.ID, err)
+			}
+		}
+
+		open.Status = "cancelled"
+		if err := payments.UpdateStatus(open.ID, open.Status); err != nil {
+			return fmt.Errorf("failed to update payment: %w", err)
+		}
+	}
+	return nil
+}
+
+// checkPayable tells why the reservation, locked, cannot be paid, if it cannot.
+func (s *paymentService) checkPayable(reservation *dbmodel.Reservation) error {
+	switch {
+	case reservation.DeletedAt.Valid || reservation.Status == dbmodel.ReservationStatusCancelled:
+		return ErrReservationCancelled
+	case reservation.Status == dbmodel.ReservationStatusWaitingList:
+		return ErrReservationWaitingList
+	case reservation.Status != dbmodel.ReservationStatusConfirmed:
+		return ErrReservationNotConfirmed
+	case reservation.Ramble.IsCancelled:
+		return ErrRambleCancelled
+	case reservation.Ramble.HasStarted(s.clock.Now()):
+		return ErrRambleStarted
+	case reservation.HasMissingPrices():
+		return ErrMissingPrices
+	case reservation.AmountDue() <= 0:
+		return ErrNothingToPay
+	}
+	return nil
+}
+
+func (s *paymentService) ProcessPaymentSuccess(paymentIntentID string) error {
+	// A late event never brings back a refunded payment.
+	return s.recordStatus(paymentIntentID, dbmodel.CollectedPaymentStatuses, map[string]any{
+		"status":  "succeeded",
+		"paid_at": time.Now(),
+	})
+}
+
+func (s *paymentService) ProcessPaymentFailure(paymentIntentID string, failureReason ...string) error {
+	return s.closePayment(paymentIntentID, "failed", failureReason...)
+}
+
+// closePayment records that the payment failed, or was cancelled on Stripe.
+func (s *paymentService) closePayment(paymentIntentID string, status string, failureReason ...string) error {
+	changes := map[string]any{"status": status}
+	if len(failureReason) > 0 && failureReason[0] != "" {
+		changes["failure_reason"] = failureReason[0]
+	}
+	return s.recordStatus(paymentIntentID, uncollectedOnly, changes)
+}
+
+// uncollectedOnly are the statuses a failure, a cancellation or a required
+// action never replaces: a late event never downgrades a payment collected,
+// nor reopens a payment cancelled.
+var uncollectedOnly = append([]string{"cancelled"}, dbmodel.CollectedPaymentStatuses...)
+
+// recordStatus applies the changes to the payment of the payment intent, in a
+// single statement, unless its status is one of kept when it runs, so that a
+// concurrent event is never overwritten.
+func (s *paymentService) recordStatus(paymentIntentID string, kept []string, changes map[string]any) error {
+	updated, err := s.paymentRepo.UpdateByStripePaymentIntentID(paymentIntentID, kept, changes)
+	if err != nil {
+		return fmt.Errorf("failed to update payment: %w", err)
+	}
+	if updated {
+		return nil
+	}
+
+	payment, err := s.paymentRepo.FindByStripePaymentIntentID(paymentIntentID)
+	if err != nil {
+		return fmt.Errorf("failed to find payment: %w", err)
+	}
+	if payment == nil {
+		return errPaymentNotFound
+	}
+	return nil
+}
+
+var errPaymentNotFound = errors.New("payment not found")
+
+// recordRefund records that refunded cents of the payment of the payment intent
+// are refunded so far, all refunds included, as Stripe knows it: refunds made
+// from the Stripe dashboard count too. A late event never lowers the amount
+// refunded recorded.
+func (s *paymentService) recordRefund(paymentIntentID string, refunded int64) error {
+	if paymentIntentID == "" {
+		return errPaymentNotFound
+	}
+	if _, err := s.paymentRepo.RecordRefundedAmount(paymentIntentID, refunded, time.Now()); err != nil {
+		return fmt.Errorf("failed to update payment: %w", err)
+	}
+
+	payment, err := s.paymentRepo.FindByStripePaymentIntentID(paymentIntentID)
+	if err != nil {
+		return fmt.Errorf("failed to find payment: %w", err)
+	}
+	if payment == nil {
+		return errPaymentNotFound
+	}
+	return nil
+}
+
+// ignoreForeignPayment ignores the failure to find the payment of the event when
+// its payment intent was not created by the application (it has no reservation
+// in its metadata), as another application on the same Stripe account may
+// create some. A reservation payment not recorded yet fails, so that Stripe
+// delivers the event again.
+func ignoreForeignPayment(eventData *stripe.WebhookEventData, err error) error {
+	if !errors.Is(err, errPaymentNotFound) {
+		return err
+	}
+	if _, ok := eventData.Metadata["reservation_id"]; ok {
+		return err
+	}
+	log.Printf("Ignoring webhook event %s on payment intent %s, not created by the application", eventData.EventType, eventData.PaymentIntentID)
+	return nil
+}
+
+// RefundPayment refunds the payment, locked while each step is decided, so
+// that simultaneous refunds add up and never exceed the amount paid.
+//
+// The refund is recorded pending, with the idempotency key that identifies it
+// on Stripe, before Stripe is called, and stays pending until Stripe's answer
+// is recorded. A refund of the amount pending is the pending refund retried:
+// it reuses its key, so that a refund whose answer was lost is not made twice,
+// even once the charge.refunded webhook recorded it. A refund of another
+// amount, or of the rest (amount nil), settles the pending refund first by
+// retrying it, then is made on what is left to refund.
+//
+// A refund Stripe refused is no longer pending, as Stripe refunded nothing: it
+// does not hold back the next one. A refund whose answer is unknown stays
+// pending.
+func (s *paymentService) RefundPayment(paymentID uint, amount *int64, reason *string) error {
+	settledOther := false
+	for {
+		request, err := s.requestRefund(paymentID, amount, settledOther)
+		if err != nil {
+			return err
+		}
+		if request == nothingLeftToRefund {
+			return nil
+		}
+		err = s.settlePendingRefund(paymentID)
+		if request != otherRefundPending {
+			return err
+		}
+		// The other refund refused is not this one: this one is made on.
+		if err != nil && !errors.Is(err, ErrRefundRefused) && !errors.Is(err, ErrRefundExceedsRefundable) {
+			return err
+		}
+		settledOther = true
+	}
+}
+
+// refundRequest is what requestRefund found to do.
+type refundRequest int
+
+const (
+	// refundPending: the refund requested is pending, to be made.
+	refundPending refundRequest = iota
+	// otherRefundPending: another refund is pending, to be settled first.
+	otherRefundPending
+	// nothingLeftToRefund: the rest was requested, and the pending refund
+	// settled refunded it all.
+	nothingLeftToRefund
+)
+
+// requestRefund records the refund of amount cents, or of the rest when amount
+// is nil, pending, unless a refund is pending already: the same amount is the
+// pending refund retried, another one waits for it.
+func (s *paymentService) requestRefund(paymentID uint, amount *int64, settledOther bool) (request refundRequest, err error) {
+	err = s.paymentRepo.ForPayment(paymentID, func(ctx context.Context, payments dbmodel.PaymentRepository, payment *dbmodel.Payment) error {
+		if payment == nil {
+			return errors.New("payment not found")
+		}
+		if payment.PendingRefundAmount != nil {
+			request = otherRefundPending
+			if amount != nil && *amount == *payment.PendingRefundAmount {
+				request = refundPending
+			}
+			return nil
+		}
+
+		refundable := payment.Amount - payment.RefundedAmount()
+		if amount == nil && settledOther && refundable <= 0 {
+			request = nothingLeftToRefund
+			return nil
+		}
+		if payment.Status == "refunded" {
+			return fmt.Errorf("%w: the payment is refunded entirely", ErrRefundExceedsRefundable)
+		}
+		if payment.Status != "succeeded" && payment.Status != "partially_refunded" {
+			return ErrPaymentNotRefundable
+		}
+		requested := refundable
+		if amount != nil {
+			requested = *amount
+		}
+		if amount != nil && requested <= 0 {
+			return ErrInvalidRefundAmount
+		}
+		if requested <= 0 || requested > refundable {
+			return fmt.Errorf("%w: %d cents left to refund", ErrRefundExceedsRefundable, max(refundable, 0))
+		}
+
+		// Keyed on what is refunded before it, so that two refunds of the
+		// same amount are two refunds
+		key := fmt.Sprintf("payment-%d-refund-%d-after-%d", payment.ID, requested, payment.RefundedAmount())
+		request = refundPending
+		return payments.SetPendingRefund(payment.ID, &requested, &key)
+	})
+	return request, err
+}
+
+// settlePendingRefund makes the pending refund of the payment on Stripe, with
+// its idempotency key, so that it is made once however often it is retried,
+// and records the amount refunded as Stripe knows it, which catches up on a
+// refund not recorded. The refund is no longer pending once Stripe answered,
+// whether it made the refund or refused it.
+func (s *paymentService) settlePendingRefund(paymentID uint) error {
+	var refused error
+	err := s.paymentRepo.ForPayment(paymentID, func(ctx context.Context, payments dbmodel.PaymentRepository, payment *dbmodel.Payment) error {
+		if payment == nil {
+			return errors.New("payment not found")
+		}
+		if payment.PendingRefundAmount == nil || payment.PendingRefundKey == nil {
+			return nil
+		}
+
+		credentials, err := s.getGuideCredentials(&payment.Guide)
+		if err != nil {
+			return err
+		}
+		refunded, err := s.stripeService.RefundPayment(ctx, credentials, payment.StripePaymentIntentID, *payment.PendingRefundAmount, *payment.PendingRefundKey)
+		var refusal *stripe.RefundRefusedError
+		if errors.As(err, &refusal) {
+			refused = fmt.Errorf("%w: %s", ErrRefundRefused, refusal.Message)
+			if refusal.ExceedsRefundable {
+				refused = fmt.Errorf("%w: %s", ErrRefundExceedsRefundable, refusal.Message)
+			}
+		} else if err != nil {
+			// Stripe may have made the refund: it stays pending.
+			return fmt.Errorf("failed to process refund: %w", err)
+		} else if _, err := payments.RecordRefundedAmount(payment.StripePaymentIntentID, refunded, time.Now()); err != nil {
+			return fmt.Errorf("failed to update payment record: %w", err)
+		}
+
+		if err := payments.SetPendingRefund(payment.ID, nil, nil); err != nil {
+			return fmt.Errorf("failed to update payment record: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return refused
 }
 
 func (s *paymentService) GetPaymentByID(id uint) (*model.Payment, error) {
@@ -412,34 +559,6 @@ func (s *paymentService) GetPaymentByID(id uint) (*model.Payment, error) {
 
 	paymentModel := payment.ToModel()
 	return &paymentModel, nil
-}
-
-func (s *paymentService) GetPaymentsByRegistration(registrationID uint) ([]model.Payment, error) {
-	payments, err := s.paymentRepo.FindByRegistrationID(registrationID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find payments: %w", err)
-	}
-
-	paymentModels := make([]model.Payment, len(payments))
-	for i, payment := range payments {
-		paymentModels[i] = payment.ToModel()
-	}
-
-	return paymentModels, nil
-}
-
-func (s *paymentService) GetPaymentsByGroup(groupID uint) ([]model.Payment, error) {
-	payments, err := s.paymentRepo.FindByGroupID(groupID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find payments: %w", err)
-	}
-
-	paymentModels := make([]model.Payment, len(payments))
-	for i, payment := range payments {
-		paymentModels[i] = payment.ToModel()
-	}
-
-	return paymentModels, nil
 }
 
 func (s *paymentService) VerifyWebhookAndProcess(payload []byte, signature string, guideID uint) error {
@@ -483,7 +602,7 @@ func (s *paymentService) VerifyWebhookAndProcess(payload []byte, signature strin
 	// Update payment status based on event type
 	switch eventData.EventType {
 	case "payment_intent.succeeded":
-		err = s.ProcessPaymentSuccess(eventData.PaymentIntentID)
+		err = ignoreForeignPayment(eventData, s.ProcessPaymentSuccess(eventData.PaymentIntentID))
 		if err != nil {
 			log.Printf("Failed to process payment success for %s: %v", eventData.PaymentIntentID, err)
 			return err
@@ -500,7 +619,7 @@ func (s *paymentService) VerifyWebhookAndProcess(payload []byte, signature strin
 			failureReason = "Payment failed"
 		}
 
-		err = s.ProcessPaymentFailure(eventData.PaymentIntentID, failureReason)
+		err = ignoreForeignPayment(eventData, s.ProcessPaymentFailure(eventData.PaymentIntentID, failureReason))
 		if err != nil {
 			log.Printf("Failed to process payment failure for %s: %v", eventData.PaymentIntentID, err)
 			return err
@@ -508,7 +627,7 @@ func (s *paymentService) VerifyWebhookAndProcess(payload []byte, signature strin
 		log.Printf("Successfully processed payment failure for %s", eventData.PaymentIntentID)
 
 	case "payment_intent.canceled":
-		err = s.ProcessPaymentFailure(eventData.PaymentIntentID, "Payment canceled")
+		err = ignoreForeignPayment(eventData, s.closePayment(eventData.PaymentIntentID, "cancelled", "Payment canceled"))
 		if err != nil {
 			log.Printf("Failed to process payment cancellation for %s: %v", eventData.PaymentIntentID, err)
 			return err
@@ -516,25 +635,20 @@ func (s *paymentService) VerifyWebhookAndProcess(payload []byte, signature strin
 		log.Printf("Successfully processed payment cancellation for %s", eventData.PaymentIntentID)
 
 	case "payment_intent.requires_action":
-		// Update status to requires_action if needed
-		payment, err := s.paymentRepo.FindByStripePaymentIntentID(eventData.PaymentIntentID)
-		if err != nil {
-			log.Printf("Failed to find payment for intent %s: %v", eventData.PaymentIntentID, err)
-			return err
-		}
-
-		if payment == nil {
-			log.Printf("No payment found for intent %s", eventData.PaymentIntentID)
-			return nil
-		}
-
-		payment.Status = "requires_action"
-		_, err = s.paymentRepo.Update(payment)
+		err = ignoreForeignPayment(eventData, s.recordStatus(eventData.PaymentIntentID, uncollectedOnly, map[string]any{"status": "requires_action"}))
 		if err != nil {
 			log.Printf("Failed to update payment status to requires_action for %s: %v", eventData.PaymentIntentID, err)
 			return err
 		}
 		log.Printf("Updated payment status to requires_action for %s", eventData.PaymentIntentID)
+
+	case "charge.refunded":
+		err = ignoreForeignPayment(eventData, s.recordRefund(eventData.PaymentIntentID, eventData.AmountRefunded))
+		if err != nil {
+			log.Printf("Failed to record the refund of %s: %v", eventData.PaymentIntentID, err)
+			return err
+		}
+		log.Printf("Recorded %d cents refunded on %s", eventData.AmountRefunded, eventData.PaymentIntentID)
 
 	default:
 		log.Printf("Unhandled webhook event type: %s", eventData.EventType)

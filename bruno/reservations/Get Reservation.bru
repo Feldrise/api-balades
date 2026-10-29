@@ -1,11 +1,11 @@
 meta {
-  name: Admin List Registrations (filtered)
+  name: Get Reservation
   type: http
-  seq: 2
+  seq: 3
 }
 
 get {
-  url: {{base_url}}/registrations/admin?ramble_id={{ramble_id}}&page=1&per_page=20
+  url: {{base_url}}/reservations/{{reservation_id}}
   body: none
   auth: bearer
 }
@@ -15,7 +15,7 @@ auth:bearer {
 }
 
 docs {
-  Guides **must** pass `ramble_id`. Admins can omit it to list all.
+  Restricted to the booker, or an admin or guide allowed to view the ramble's registrations.
 }
 
 tests {

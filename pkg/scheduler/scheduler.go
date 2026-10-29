@@ -12,11 +12,12 @@ type Reservations interface {
 	SendConfirmationRequests(now time.Time) error
 	CancelUnconfirmedReservations(now time.Time) error
 	CancelPaymentsOfStartedRambles(now time.Time) error
+	CancelPaymentsOfCancelledReservations() error
 }
 
 // ReservationScheduler asks bookers to confirm before the ramble, cancels the
 // reservations left unconfirmed at the deadline and the payments left open
-// once the ramble has started.
+// once the ramble has started or the reservation cancelled.
 type ReservationScheduler struct {
 	reservations Reservations
 	clock        clock.Clock
@@ -50,5 +51,8 @@ func (s *ReservationScheduler) run() {
 	}
 	if err := s.reservations.CancelPaymentsOfStartedRambles(now); err != nil {
 		log.Printf("Error cancelling the payments of started rambles: %v", err)
+	}
+	if err := s.reservations.CancelPaymentsOfCancelledReservations(); err != nil {
+		log.Printf("Error cancelling the payments of cancelled reservations: %v", err)
 	}
 }

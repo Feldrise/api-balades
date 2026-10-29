@@ -97,6 +97,21 @@ func (config *Config) CancelPaymentsOfStartedRambles(now time.Time) error {
 	return nil
 }
 
+// CancelPaymentsOfCancelledReservations cancels the open payments left by the
+// reservations cancelled or deleted, or of a cancelled ramble, when their
+// cancellation on Stripe failed at the time.
+func (config *Config) CancelPaymentsOfCancelledReservations() error {
+	reservations, err := config.ReservationRepository.FindCancelledWithOpenPayments()
+	if err != nil {
+		return err
+	}
+
+	for i := range reservations {
+		config.cancelObsoletePayments(&reservations[i])
+	}
+	return nil
+}
+
 func (config *Config) sendConfirmationRequest(reservation *dbmodel.Reservation, deadline time.Time) error {
 	firstName, lastName := reservation.BookerName()
 	data := email.EventConfirmationRequestData{

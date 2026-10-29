@@ -568,3 +568,43 @@ func TestPaymentIsNotPreparedWhenTheReservationStopsBeingPayableDuringTheConfirm
 		})
 	}
 }
+
+func TestSchedulerCancelsTheOpenPaymentsLeftByACancellationOrADeletion(t *testing.T) {
+	for _, closing := range []string{"cancelled by the booker", "deleted by an admin"} {
+		t.Run(closing, func(t *testing.T) {
+			h := testharness.New(t)
+			ramble := h.CreateRamble(payingFamilyRamble())
+			created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+			token := h.Login("alice@example.com")
+			openConfirmation(h, ramble)
+			confirmReservation(h, created.ID, token)
+			intent := h.Stripe.PaymentIntents()[0].ID
+
+			h.Stripe.SetCancellationFailing(true)
+			if closing == "deleted by an admin" {
+				if response := adminDelete(h, created.ID, h.Token(h.CreateUser("admin@example.com", "admin"))); response.Code != http.StatusNoContent {
+					t.Fatalf("deleting: expected 204, got %d: %s", response.Code, response.Body)
+				}
+			} else if response := cancelReservation(h, created.ID, token); response.Code != http.StatusOK {
+				t.Fatalf("cancelling: expected 200, got %d: %s", response.Code, response.Body)
+			}
+			if cancelled := h.Stripe.CancelledPaymentIntents(); len(cancelled) != 0 {
+				t.Fatalf("expected the cancellation on Stripe to fail, got %v", cancelled)
+			}
+
+			h.Stripe.SetCancellationFailing(false)
+			if err := reservations.New(h.Config).CancelPaymentsOfCancelledReservations(); err != nil {
+				t.Fatalf("cancelling the payments of cancelled reservations: %v", err)
+			}
+
+			if cancelled := h.Stripe.CancelledPaymentIntents(); len(cancelled) != 1 || cancelled[0] != intent {
+				t.Errorf("expected the open payment cancelled on Stripe at the next pass, got %v", cancelled)
+			}
+			var status string
+			h.DB.Raw("SELECT status FROM payments WHERE stripe_payment_intent_id = ?", intent).Scan(&status)
+			if status != "cancelled" {
+				t.Errorf("expected the payment recorded cancelled, got %q", status)
+			}
+		})
+	}
+}

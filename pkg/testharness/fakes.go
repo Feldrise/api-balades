@@ -112,7 +112,17 @@ type FakeStripeService struct {
 	cancelled      []string
 	refunds        []Refund
 	unavailable    bool
+	cancelFailing  bool
 	creationDelay  time.Duration
+}
+
+// SetCancellationFailing makes the cancellation of payment intents fail, as
+// when Stripe is unreachable.
+func (s *FakeStripeService) SetCancellationFailing(failing bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.cancelFailing = failing
 }
 
 // SetCreationDelay makes the creation of payment intents take delay, as a
@@ -215,6 +225,9 @@ func (s *FakeStripeService) CancelPaymentIntent(credentials stripe.GuideStripeCr
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.cancelFailing {
+		return errors.New("stripe is unavailable")
+	}
 	if slices.Contains(s.cancelled, paymentIntentID) {
 		return fmt.Errorf("payment intent %q is cancelled already", paymentIntentID)
 	}

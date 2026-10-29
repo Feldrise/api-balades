@@ -45,3 +45,29 @@ type AdminReservationListResponse struct {
 	PerPage      int            `json:"per_page"`
 	TotalPages   int            `json:"total_pages"`
 } // @name AdminReservationListResponse
+
+// ReservationStatuses are the statuses an admin can set on a reservation.
+var reservationStatuses = map[string]bool{
+	"pending":      true,
+	"confirmed":    true,
+	"waiting_list": true,
+	"cancelled":    true,
+}
+
+type AdminReservationStatusUpdatePayload struct {
+	Status    string  `json:"status"`
+	Reason    *string `json:"reason,omitempty"`
+	SendEmail *bool   `json:"send_email,omitempty"` // Whether to send the reservation summary to the booker
+} // @name AdminReservationStatusUpdatePayload
+
+func (payload *AdminReservationStatusUpdatePayload) Bind(r *http.Request) error {
+	if payload.Status == "" {
+		return errors.New("status is required")
+	}
+
+	if !reservationStatuses[payload.Status] {
+		return errors.New("invalid status. Valid statuses are: pending, confirmed, waiting_list, cancelled")
+	}
+
+	return nil
+}

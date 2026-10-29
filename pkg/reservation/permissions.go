@@ -65,3 +65,17 @@ func (config *Config) resolveGuideRambleScope(w http.ResponseWriter, r *http.Req
 	}
 	return ownedIDs, true
 }
+
+// canActOnRamble reports whether user holds the blanket permission, or the self
+// permission and guides the ramble.
+func (config *Config) canActOnRamble(user *dbmodel.User, rambleID uint, blanketPerm, selfPerm string) (bool, error) {
+	if user.HasPermission(blanketPerm) {
+		return true, nil
+	}
+
+	if user.HasPermission(selfPerm) {
+		return config.GuideRepository.UserOwnsRamble(user.ID, rambleID)
+	}
+
+	return false, nil
+}

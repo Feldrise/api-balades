@@ -210,3 +210,87 @@ func toDBFilter(filter *model.AdminReservationFilterPayload) (*dbmodel.Reservati
 
 	return dbFilter, nil
 }
+
+// @Summary Update reservation status (admin)
+// @Description Set the status of a reservation, as a whole. A reservation put back in pending, confirmed or waiting list from a status that holds no place must fit entirely in the places left. The places released go to the waiting list.
+// @Tags admin,reservations
+// @Accept json
+// @Produce json
+// @Param id path int true "Reservation ID"
+// @Param status body model.AdminReservationStatusUpdatePayload true "Status update data"
+// @Success 200 {object} model.Reservation
+// @Failure 400 {object} errors.ErrResponse
+// @Failure 401 {object} errors.ErrResponse
+// @Failure 403 {object} errors.ErrResponse
+// @Failure 404 {object} errors.ErrResponse
+// @Failure 409 {object} errors.ErrResponse "not_enough_places"
+// @Router /reservations/admin/{id}/status [put]
+func (config *Config) AdminUpdateStatus(w http.ResponseWriter, r *http.Request) {
+	user := authentication.ForContext(r.Context())
+	if user == nil {
+		render.Render(w, r, errors.ErrUnauthorized("authentication required"))
+		return
+	}
+
+	id, ok := parseID(w, r, "id")
+	if !ok {
+		return
+	}
+
+	data := &model.AdminReservationStatusUpdatePayload{}
+	if err := render.Bind(r, data); err != nil {
+		render.Render(w, r, errors.ErrInvalidRequest(err))
+		return
+	}
+
+	reservation, ok := config.reservationToAdminister(w, r, user, id, "update:registration-status", "update:registration-status:self")
+	if !ok {
+		return
+	}
+
+	result, err := config.setStatus(reservation, data.Status, data.Reason)
+	if err != nil {
+		render.Render(w, r, renderError(err))
+		return
+	}
+	config.notifyPromoted(result.promoted)
+
+	updated, err := config.ReservationRepository.FindByID(id)
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return
+	}
+
+	if result.changed && data.SendEmail != nil && *data.SendEmail {
+		config.sendReservationEmail(updated, changeStatusUpdated)
+	}
+
+	render.JSON(w, r, updated.ToModel())
+}
+
+// reservationToAdminister returns the reservation when the user holds the
+// blanket permission, or the self permission and guides its ramble, and renders
+// the error otherwise.
+func (config *Config) reservationToAdminister(w http.ResponseWriter, r *http.Request, user *dbmodel.User, id uint, blanketPerm, selfPerm string) (*dbmodel.Reservation, bool) {
+	reservation, err := config.ReservationRepository.FindByID(id)
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return nil, false
+	}
+	if reservation == nil {
+		render.Render(w, r, errors.ErrNotFound())
+		return nil, false
+	}
+
+	allowed, err := config.canActOnRamble(user, reservation.RambleID, blanketPerm, selfPerm)
+	if err != nil {
+		render.Render(w, r, errors.ErrServerError(err))
+		return nil, false
+	}
+	if !allowed {
+		render.Render(w, r, errors.ErrForbidden("insufficient permissions"))
+		return nil, false
+	}
+
+	return reservation, true
+}

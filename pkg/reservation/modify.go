@@ -1,6 +1,8 @@
 package reservation
 
 import (
+	"slices"
+
 	"feldrise.com/balade/database/dbmodel"
 	"feldrise.com/balade/pkg/model"
 )
@@ -9,6 +11,8 @@ import (
 // that left the waiting list are told by email once the change is saved.
 type modification struct {
 	promoted []uint
+	// changed is false when the change left the reservation as it was.
+	changed bool
 }
 
 // addParticipants adds participants to the reservation, all of them or none:
@@ -173,12 +177,13 @@ func (config *Config) cancel(locked *dbmodel.LockedRamble, reservation *dbmodel.
 
 // promoteWaitingList goes through the reservations in waiting list by creation
 // date and admits each one that fits entirely in the places left, never splitting
-// a reservation. It returns the admitted reservations.
-func (config *Config) promoteWaitingList(locked *dbmodel.LockedRamble) ([]uint, error) {
+// a reservation. It returns the admitted reservations. The reservations of the
+// skipped ids are left in the waiting list, as when an admin just moved them there.
+func (config *Config) promoteWaitingList(locked *dbmodel.LockedRamble, skipped ...uint) ([]uint, error) {
 	var promoted []uint
 	for i := range locked.Active {
 		reservation := &locked.Active[i]
-		if reservation.Status != dbmodel.ReservationStatusWaitingList {
+		if reservation.Status != dbmodel.ReservationStatusWaitingList || slices.Contains(skipped, reservation.ID) {
 			continue
 		}
 

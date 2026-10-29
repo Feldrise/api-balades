@@ -46,6 +46,8 @@ type reservation struct {
 	ContactEmail     string        `json:"contact_email"`
 	Status           string        `json:"status"`
 	ConfirmationDate *time.Time    `json:"confirmation_date"`
+	CancellationDate *time.Time    `json:"cancellation_date"`
+	CancellationReason *string     `json:"cancellation_reason"`
 	Participants     []participant `json:"participants"`
 	EstimatedAmount  int64         `json:"estimated_amount"`
 	HasMissingPrices bool          `json:"has_missing_prices"`

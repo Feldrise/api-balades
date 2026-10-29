@@ -273,6 +273,20 @@ func (l *LockedRamble) Reservation(id uint) *Reservation {
 	return nil
 }
 
+// CancelledReservation returns the cancelled reservation of the ramble with the
+// given id, nil when there is none.
+func (l *LockedRamble) CancelledReservation(id uint) (*Reservation, error) {
+	var reservation Reservation
+	err := l.tx.Preload("Participants", func(db *gorm.DB) *gorm.DB { return db.Order("participants.id ASC") }).
+		Preload("Payments").
+		Where("ramble_id = ? AND status = ?", l.Ramble.ID, ReservationStatusCancelled).
+		First(&reservation, id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &reservation, err
+}
+
 // AddParticipants saves participants as new participants of reservation.
 func (l *LockedRamble) AddParticipants(reservation *Reservation, participants []Participant) error {
 	for i := range participants {

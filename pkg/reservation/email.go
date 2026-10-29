@@ -16,6 +16,7 @@ const (
 	changeParticipantsAdded   = "participants_added"
 	changeParticipantsRemoved = "participants_removed"
 	changePromoted            = "promoted"
+	changeStatusUpdated       = "status_updated"
 )
 
 var emailSubjects = map[string]string{
@@ -23,6 +24,7 @@ var emailSubjects = map[string]string{
 	changeParticipantsAdded:   "Participants ajoutés à votre réservation - Balade Écologique",
 	changeParticipantsRemoved: "Participants retirés de votre réservation - Balade Écologique",
 	changePromoted:            "Place disponible - Balade Écologique",
+	changeStatusUpdated:       "Votre réservation a été mise à jour - Balade Écologique",
 }
 
 // sendReservationConfirmationEmail sends the summary of a new reservation to the booker.

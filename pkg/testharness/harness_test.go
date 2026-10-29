@@ -66,3 +66,36 @@ func TestHarnessResetsDatabaseBetweenTests(t *testing.T) {
 		})
 	}
 }
+
+func TestHarnessRestoresReferenceDataBetweenTests(t *testing.T) {
+	t.Run("test altering roles and permissions", func(t *testing.T) {
+		h := testharness.New(t)
+		h.DB.Exec("DELETE FROM role_permissions")
+		h.DB.Exec("UPDATE permissions SET name = name || ':altered'")
+		h.DB.Exec("DELETE FROM roles WHERE name = 'guide'")
+	})
+
+	t.Run("next test", func(t *testing.T) {
+		h := testharness.New(t)
+		ramble := h.CreateRamble(testharness.RambleOptions{})
+		response := h.Do(http.MethodPost, "/reservations", map[string]any{
+			"ramble_id":     ramble.ID,
+			"contact_email": "alice@example.com",
+			"participants":  []map[string]any{{"first_name": "Alice", "last_name": "Martin"}},
+		}, "")
+		if response.Code != http.StatusCreated {
+			t.Fatalf("POST /reservations: expected 201, got %d: %s", response.Code, response.Body)
+		}
+		var created struct {
+			ID uint `json:"id"`
+		}
+		response.JSON(t, &created)
+
+		h.CreateUser("guide@example.com", "guide")
+		admin := h.CreateUser("admin@example.com", "admin")
+		response = h.Do(http.MethodGet, fmt.Sprintf("/reservations/%d", created.ID), nil, h.Token(admin))
+		if response.Code != http.StatusOK {
+			t.Errorf("expected the admin's permissions to be restored, got %d: %s", response.Code, response.Body)
+		}
+	})
+}

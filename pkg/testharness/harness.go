@@ -34,21 +34,20 @@ const (
 
 	// databaseLockID serializes tests of every package on the shared test database.
 	databaseLockID = 742001
+
+	// referenceSchema holds a copy of the reference data, restored before each test.
+	referenceSchema = "testharness_reference"
 )
 
-// Tables kept between tests: reference data created by the seeds.
-var preservedTables = map[string]bool{
-	"seeds":            true,
-	"permissions":      true,
-	"roles":            true,
-	"role_permissions": true,
-}
+// Tables of the reference data created by the seeds, restored before each test.
+var referenceTables = []string{"seeds", "permissions", "roles", "role_permissions"}
 
 var (
-	openOnce   sync.Once
-	sharedDB   *gorm.DB
-	openErr    error
-	migrateMux sync.Once
+	openOnce    sync.Once
+	sharedDB    *gorm.DB
+	openErr     error
+	prepareOnce sync.Once
+	prepareErr  error
 )
 
 type Harness struct {
@@ -71,9 +70,13 @@ func New(t *testing.T) *Harness {
 	db := openDatabase(t)
 	lockDatabase(t, db)
 
-	migrateMux.Do(func() {
+	prepareOnce.Do(func() {
 		database.Migrate(db)
+		prepareErr = snapshotReferenceData(db)
 	})
+	if prepareErr != nil {
+		t.Fatalf("preparing test database: %v", prepareErr)
+	}
 
 	resetDatabase(t, db)
 
@@ -159,49 +162,95 @@ func unlock(conn *sql.Conn) {
 	conn.Close()
 }
 
-// resetDatabase empties every table but the seeded reference data, and restarts
-// identities. DELETE is used rather than TRUNCATE, which is much slower on small tables.
-func resetDatabase(t *testing.T, db *gorm.DB) {
-	t.Helper()
-
-	var tables []string
-	if err := db.Raw("SELECT tablename FROM pg_tables WHERE schemaname = 'public'").Scan(&tables).Error; err != nil {
-		t.Fatalf("listing tables: %v", err)
+// snapshotReferenceData rebuilds the reference data from the seeds on an
+// emptied database, whatever a previous run left, and copies it aside.
+func snapshotReferenceData(db *gorm.DB) error {
+	if err := emptyTables(db, nil); err != nil {
+		return err
 	}
+	database.ApplySeeds(db)
 
-	err := db.Transaction(func(tx *gorm.DB) error {
-		// Skips foreign key checks, so that tables can be emptied in any order.
-		if err := tx.Exec("SET LOCAL session_replication_role = replica").Error; err != nil {
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`DROP SCHEMA IF EXISTS "` + referenceSchema + `" CASCADE`).Error; err != nil {
 			return err
 		}
-
-		for _, table := range tables {
-			if preservedTables[table] {
-				continue
-			}
-			if err := tx.Exec(`DELETE FROM "` + table + `"`).Error; err != nil {
+		if err := tx.Exec(`CREATE SCHEMA "` + referenceSchema + `"`).Error; err != nil {
+			return err
+		}
+		for _, table := range referenceTables {
+			if err := tx.Exec(`CREATE TABLE "` + referenceSchema + `"."` + table + `" AS TABLE "` + table + `"`).Error; err != nil {
 				return err
 			}
 		}
+		return nil
+	})
+}
 
-		return tx.Exec(`
-			SELECT setval(pg_get_serial_sequence(quote_ident(c.table_name), c.column_name), 1, false)
-			FROM information_schema.columns c
-			WHERE c.table_schema = 'public'
-			  AND c.column_default LIKE 'nextval%'
-			  AND c.table_name NOT IN ?`, preservedTableNames()).Error
+// resetDatabase empties every table, restores the reference data and restarts
+// identities after it. DELETE is used rather than TRUNCATE, which is much slower
+// on small tables.
+func resetDatabase(t *testing.T, db *gorm.DB) {
+	t.Helper()
+
+	err := emptyTables(db, func(tx *gorm.DB) error {
+		for _, table := range referenceTables {
+			if err := tx.Exec(`INSERT INTO "` + table + `" SELECT * FROM "` + referenceSchema + `"."` + table + `"`).Error; err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		t.Fatalf("resetting test database: %v", err)
 	}
 }
 
-func preservedTableNames() []string {
-	names := make([]string, 0, len(preservedTables))
-	for name := range preservedTables {
-		names = append(names, name)
+// emptyTables deletes the rows of every table, runs fill in the same
+// transaction, and restarts every identity after the remaining rows.
+func emptyTables(db *gorm.DB, fill func(tx *gorm.DB) error) error {
+	var tables []string
+	if err := db.Raw("SELECT tablename FROM pg_tables WHERE schemaname = 'public'").Scan(&tables).Error; err != nil {
+		return err
 	}
-	return names
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		// Skips foreign key checks, so that tables can be emptied in any order.
+		if err := tx.Exec("SET LOCAL session_replication_role = replica").Error; err != nil {
+			return err
+		}
+
+		for _, table := range tables {
+			if err := tx.Exec(`DELETE FROM "` + table + `"`).Error; err != nil {
+				return err
+			}
+		}
+
+		if fill != nil {
+			if err := fill(tx); err != nil {
+				return err
+			}
+		}
+
+		var sequences []struct {
+			Table  string
+			Column string
+		}
+		err := tx.Raw(`
+			SELECT table_name AS "table", column_name AS "column"
+			FROM information_schema.columns
+			WHERE table_schema = 'public' AND column_default LIKE 'nextval%'`).Scan(&sequences).Error
+		if err != nil {
+			return err
+		}
+		for _, sequence := range sequences {
+			err := tx.Exec(`SELECT setval(pg_get_serial_sequence(?, ?), COALESCE((SELECT MAX("`+sequence.Column+`") FROM "`+sequence.Table+`"), 0) + 1, false)`,
+				`"`+sequence.Table+`"`, sequence.Column).Error
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // Response is a recorded HTTP response.

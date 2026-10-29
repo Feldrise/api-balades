@@ -160,14 +160,14 @@
                                                         {{range .Participants}}
                                                         <li
                                                             style="font-size: 16px; font-family: 'Lato', Helvetica, Arial, sans-serif; color: #666666; margin: 5px 0;">
-                                                            {{.Name}}{{if .PriceLabel}} – {{.PriceLabel}} : {{.Price}}{{end}}
+                                                            {{.Name}}{{if .PriceMissing}} – tarif à préciser{{else if .PriceLabel}} – {{.PriceLabel}} : {{.Price}}{{end}}
                                                         </li>
                                                         {{end}}
                                                     </ul>
                                                     {{if .HasPrices}}
                                                     <p
                                                         style="font-size: 16px; font-family: 'Lato', Helvetica, Arial, sans-serif; color: #111111; margin: 5px 0;">
-                                                        <strong>Montant estimé :</strong> {{.EstimatedAmount}}
+                                                        <strong>Montant estimé :</strong> {{.EstimatedAmount}}{{if .HasMissingPrices}} hors tarifs à préciser{{end}}
                                                     </p>
                                                     {{end}}
                                                 </td>

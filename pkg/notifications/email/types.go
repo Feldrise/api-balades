@@ -34,10 +34,12 @@ type ReservationConfirmationData struct {
 	Participants []ReservationParticipantInfo
 	// HasPrices tells whether the ramble has prices, so an estimated amount.
 	HasPrices bool
-	// EstimatedAmount is formatted, e.g. "18,50 €".
+	// EstimatedAmount is formatted, e.g. "18,50 €", and sums the known prices.
 	EstimatedAmount string
-	PaymentEnabled  bool
-	ReservationURL  string
+	// HasMissingPrices tells that a participant's price is unknown.
+	HasMissingPrices bool
+	PaymentEnabled   bool
+	ReservationURL   string
 }
 
 type ReservationParticipantInfo struct {
@@ -45,6 +47,8 @@ type ReservationParticipantInfo struct {
 	PriceLabel string
 	// Price is formatted, e.g. "12,50 €".
 	Price string
+	// PriceMissing tells that the ramble has prices but the participant's is unknown.
+	PriceMissing bool
 }
 
 type PriceInfo struct {

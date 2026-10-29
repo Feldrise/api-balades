@@ -28,8 +28,9 @@ type participant struct {
 	FirstName   string  `json:"first_name"`
 	LastName    string  `json:"last_name"`
 	PriceLabel  string  `json:"price_label"`
-	PriceAmount float64 `json:"price_amount"`
-	IsBooker    bool    `json:"is_booker"`
+	PriceAmount  float64 `json:"price_amount"`
+	PriceMissing bool    `json:"price_missing"`
+	IsBooker     bool    `json:"is_booker"`
 }
 
 type payment struct {
@@ -46,6 +47,7 @@ type reservation struct {
 	ConfirmationDate *time.Time    `json:"confirmation_date"`
 	Participants     []participant `json:"participants"`
 	EstimatedAmount  int64         `json:"estimated_amount"`
+	HasMissingPrices bool          `json:"has_missing_prices"`
 	Payments         []payment     `json:"payments"`
 	Ramble           *struct {
 		Title string `json:"title"`
@@ -121,7 +123,7 @@ func TestBookerReservesForSeveralParticipantsWithPrices(t *testing.T) {
 		t.Fatalf("expected the booker to see their reservation %d, got %s", created.ID, response.Body)
 	}
 	got := mine[0]
-	if got.ContactEmail != "alice@example.com" || got.Status != "pending" || got.EstimatedAmount != 3100 {
+	if got.ContactEmail != "alice@example.com" || got.Status != "pending" || got.EstimatedAmount != 3100 || got.HasMissingPrices {
 		t.Errorf("unexpected reservation: %s", response.Body)
 	}
 	if got.Ramble == nil || got.Ramble.Title != ramble.Title {

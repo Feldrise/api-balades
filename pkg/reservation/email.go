@@ -18,22 +18,24 @@ func (config *Config) sendReservationConfirmationEmail(reservation *dbmodel.Rese
 	participants := make([]email.ReservationParticipantInfo, len(reservation.Participants))
 	for i, participant := range reservation.Participants {
 		participants[i] = email.ReservationParticipantInfo{
-			Name:       participant.FirstName + " " + participant.LastName,
-			PriceLabel: participant.PriceLabel,
-			Price:      formatEuros(ramble.PriceAmount(participant.PriceLabel)),
+			Name:         participant.FirstName + " " + participant.LastName,
+			PriceLabel:   participant.PriceLabel,
+			Price:        formatEuros(ramble.PriceAmount(participant.PriceLabel)),
+			PriceMissing: ramble.PriceMissing(participant.PriceLabel),
 		}
 	}
 
 	data := email.ReservationConfirmationData{
-		Title:           ramble.Title,
-		Date:            formatDate(ramble.Date),
-		Location:        formatLocation(ramble.Location),
-		Status:          reservation.Status,
-		Participants:    participants,
-		HasPrices:       len(ramble.Prices) > 0,
-		EstimatedAmount: formatCents(reservation.EstimatedAmount()),
-		PaymentEnabled:  ramble.PaymentEnabled,
-		ReservationURL:  fmt.Sprintf("%s/mes-reservations/%d", config.ApplicationURL, reservation.ID),
+		Title:            ramble.Title,
+		Date:             formatDate(ramble.Date),
+		Location:         formatLocation(ramble.Location),
+		Status:           reservation.Status,
+		Participants:     participants,
+		HasPrices:        len(ramble.Prices) > 0,
+		EstimatedAmount:  formatCents(reservation.EstimatedAmount()),
+		HasMissingPrices: reservation.HasMissingPrices(),
+		PaymentEnabled:   ramble.PaymentEnabled,
+		ReservationURL:   fmt.Sprintf("%s/mes-reservations/%d", config.ApplicationURL, reservation.ID),
 	}
 
 	err := config.EmailService.Send(

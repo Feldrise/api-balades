@@ -87,8 +87,33 @@ func (rm *Ramble) PriceAmount(label string) float64 {
 	return 0
 }
 
+// PriceMissing reports whether the participant's price is unknown: the ramble
+// has prices but none is labelled label, as for participants migrated from a
+// ramble with several prices.
+func (rm *Ramble) PriceMissing(label string) bool {
+	if len(rm.Prices) == 0 {
+		return false
+	}
+	for _, price := range rm.Prices {
+		if price.Label == label {
+			return false
+		}
+	}
+	return true
+}
+
+// HasMissingPrices reports whether a participant of the reservation has an unknown price.
+func (r *Reservation) HasMissingPrices() bool {
+	for _, participant := range r.Participants {
+		if r.Ramble.PriceMissing(participant.PriceLabel) {
+			return true
+		}
+	}
+	return false
+}
+
 // EstimatedAmount returns the amount in cents of the reservation, computed from
-// the prices of its participants.
+// the known prices of its participants.
 func (r *Reservation) EstimatedAmount() int64 {
 	var total int64
 	for _, participant := range r.Participants {
@@ -106,12 +131,13 @@ func (r *Reservation) ToModel() *model.Reservation {
 	participants := make([]model.Participant, len(r.Participants))
 	for i, participant := range r.Participants {
 		participants[i] = model.Participant{
-			ID:          participant.ID,
-			FirstName:   participant.FirstName,
-			LastName:    participant.LastName,
-			PriceLabel:  participant.PriceLabel,
-			PriceAmount: r.Ramble.PriceAmount(participant.PriceLabel),
-			IsBooker:    participant.IsBooker,
+			ID:           participant.ID,
+			FirstName:    participant.FirstName,
+			LastName:     participant.LastName,
+			PriceLabel:   participant.PriceLabel,
+			PriceAmount:  r.Ramble.PriceAmount(participant.PriceLabel),
+			PriceMissing: r.Ramble.PriceMissing(participant.PriceLabel),
+			IsBooker:     participant.IsBooker,
 		}
 	}
 
@@ -143,6 +169,7 @@ func (r *Reservation) ToModel() *model.Reservation {
 		CancellationReason:   r.CancellationReason,
 		Participants:         participants,
 		EstimatedAmount:      r.EstimatedAmount(),
+		HasMissingPrices:     r.HasMissingPrices(),
 		Payments:             payments,
 	}
 

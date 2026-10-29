@@ -23,9 +23,12 @@ type Reservation struct {
 	CancellationReason   *string    `json:"cancellation_reason,omitempty"`
 
 	Participants []Participant `json:"participants"`
-	// EstimatedAmount is the amount in cents computed from the participants' prices.
-	EstimatedAmount int64                `json:"estimated_amount"`
-	Payments        []ReservationPayment `json:"payments"`
+	// EstimatedAmount is the amount in cents computed from the participants' known prices.
+	EstimatedAmount int64 `json:"estimated_amount"`
+	// HasMissingPrices tells that a participant's price is unknown, so that
+	// EstimatedAmount is incomplete.
+	HasMissingPrices bool                 `json:"has_missing_prices"`
+	Payments         []ReservationPayment `json:"payments"`
 
 	Ramble *RambleRegistrationSummary `json:"ramble,omitempty"`
 } // @name Reservation
@@ -35,9 +38,12 @@ type Participant struct {
 	FirstName  string `json:"first_name"`
 	LastName   string `json:"last_name"`
 	PriceLabel string `json:"price_label"`
-	// PriceAmount is the amount in euros of the participant's price.
+	// PriceAmount is the amount in euros of the participant's price, 0 when the price is missing.
 	PriceAmount float64 `json:"price_amount"`
-	IsBooker    bool    `json:"is_booker"`
+	// PriceMissing tells that the ramble has prices but the participant's is
+	// unknown, as for participants migrated from a ramble with several prices.
+	PriceMissing bool `json:"price_missing"`
+	IsBooker     bool `json:"is_booker"`
 } // @name Participant
 
 type ReservationPayment struct {

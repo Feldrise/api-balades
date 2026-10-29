@@ -180,6 +180,34 @@ func TestStartupMigratesGroupsAsOneReservationOfTheirContact(t *testing.T) {
 	}
 }
 
+func TestMigratedParticipantsOfARambleWithSeveralPricesHaveAMissingPrice(t *testing.T) {
+	h := testharness.New(t)
+	l := legacy{t, h}
+	ramble := h.CreateRamble(familyRamble())
+	group := l.group(ramble, "parent@example.com", "pending")
+	l.registration(ramble, "Paul", "parent@example.com", "pending", &group.ID)
+	l.registration(ramble, "Léa", "lea@example.com", "pending", &group.ID)
+
+	h.MigrateAtStartup()
+
+	mine := myReservations(t, h, "parent@example.com")
+	if len(mine) != 1 {
+		t.Fatalf("expected the group as one reservation, got %d", len(mine))
+	}
+	got := mine[0]
+	if !got.HasMissingPrices {
+		t.Errorf("expected the reservation to have missing prices, got %+v", got)
+	}
+	for _, p := range got.Participants {
+		if !p.PriceMissing || p.PriceLabel != "" || p.PriceAmount != 0 {
+			t.Errorf("expected participant %s to have a missing price, got %+v", p.FirstName, p)
+		}
+	}
+	if got.EstimatedAmount != 0 {
+		t.Errorf("expected the estimated amount to sum the known prices only (0), got %d", got.EstimatedAmount)
+	}
+}
+
 func TestStartupMigratesSplitGroupsWithTheirMostAdvancedStatus(t *testing.T) {
 	cases := []struct {
 		name     string

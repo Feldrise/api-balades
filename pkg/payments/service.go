@@ -1,6 +1,7 @@
 package payments
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -84,16 +85,16 @@ func NewPaymentService(
 
 func (s *paymentService) CreatePaymentForReservation(reservation *dbmodel.Reservation, payerInfo PayerInfo) (*model.PaymentResponse, error) {
 	var response *model.PaymentResponse
-	err := s.paymentRepo.ForReservation(reservation.ID, func(payments dbmodel.PaymentRepository, locked *dbmodel.Reservation) error {
+	err := s.paymentRepo.ForReservation(reservation.ID, func(ctx context.Context, payments dbmodel.PaymentRepository, locked *dbmodel.Reservation) error {
 		var err error
-		response, err = s.createPayment(payments, locked, payerInfo)
+		response, err = s.createPayment(ctx, payments, locked, payerInfo)
 		return err
 	})
 	return response, err
 }
 
 // createPayment gives the payment of the amount due by the reservation, locked.
-func (s *paymentService) createPayment(payments dbmodel.PaymentRepository, reservation *dbmodel.Reservation, payerInfo PayerInfo) (*model.PaymentResponse, error) {
+func (s *paymentService) createPayment(ctx context.Context, payments dbmodel.PaymentRepository, reservation *dbmodel.Reservation, payerInfo PayerInfo) (*model.PaymentResponse, error) {
 	if err := s.checkPayable(reservation); err != nil {
 		return nil, err
 	}
@@ -113,12 +114,12 @@ func (s *paymentService) createPayment(payments dbmodel.PaymentRepository, reser
 		return nil, err
 	}
 
-	if err := s.cancelObsoletePayments(payments, reservation, guide); err != nil {
+	if err := s.cancelObsoletePayments(ctx, payments, reservation, guide); err != nil {
 		return nil, err
 	}
 
 	if kept := keptPayment(reservation, guide); kept != nil {
-		paymentIntent, err := s.stripeService.RetrievePaymentIntent(credentials, kept.StripePaymentIntentID)
+		paymentIntent, err := s.stripeService.RetrievePaymentIntent(ctx, credentials, kept.StripePaymentIntentID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to retrieve payment intent: %w", err)
 		}
@@ -151,7 +152,7 @@ func (s *paymentService) createPayment(payments dbmodel.PaymentRepository, reser
 	}
 
 	idempotencyKey := paymentIdempotencyKey(reservationID, len(reservation.Payments)+1, amountCents, "eur", metadata)
-	paymentIntent, err := s.stripeService.CreatePaymentIntent(credentials, amountCents, "eur", metadata, idempotencyKey)
+	paymentIntent, err := s.stripeService.CreatePaymentIntent(ctx, credentials, amountCents, "eur", metadata, idempotencyKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create payment intent: %w", err)
 	}
@@ -194,12 +195,12 @@ func paymentIdempotencyKey(reservationID uint, paymentNumber int, amount int64, 
 }
 
 func (s *paymentService) CancelObsoletePayments(reservation *dbmodel.Reservation) error {
-	return s.paymentRepo.ForReservation(reservation.ID, func(payments dbmodel.PaymentRepository, locked *dbmodel.Reservation) error {
+	return s.paymentRepo.ForReservation(reservation.ID, func(ctx context.Context, payments dbmodel.PaymentRepository, locked *dbmodel.Reservation) error {
 		guide, err := s.payableTo(locked)
 		if err != nil {
 			return err
 		}
-		return s.cancelObsoletePayments(payments, locked, guide)
+		return s.cancelObsoletePayments(ctx, payments, locked, guide)
 	})
 }
 
@@ -240,7 +241,7 @@ func keptPayment(reservation *dbmodel.Reservation, guide *dbmodel.Guide) *dbmode
 // cancelObsoletePayments cancels every open payment of the reservation, locked,
 // but the one it may still pay to guide (see keptPayment), so that a single
 // payment can be paid at a time.
-func (s *paymentService) cancelObsoletePayments(payments dbmodel.PaymentRepository, reservation *dbmodel.Reservation, guide *dbmodel.Guide) error {
+func (s *paymentService) cancelObsoletePayments(ctx context.Context, payments dbmodel.PaymentRepository, reservation *dbmodel.Reservation, guide *dbmodel.Guide) error {
 	kept := keptPayment(reservation, guide)
 
 	for i := range reservation.Payments {
@@ -260,9 +261,9 @@ func (s *paymentService) cancelObsoletePayments(payments dbmodel.PaymentReposito
 		if err != nil {
 			return err
 		}
-		if err := s.stripeService.CancelPaymentIntent(credentials, open.StripePaymentIntentID); err != nil {
+		if err := s.stripeService.CancelPaymentIntent(ctx, credentials, open.StripePaymentIntentID); err != nil {
 			// Stripe refuses to cancel a payment intent cancelled already.
-			paymentIntent, retrieveErr := s.stripeService.RetrievePaymentIntent(credentials, open.StripePaymentIntentID)
+			paymentIntent, retrieveErr := s.stripeService.RetrievePaymentIntent(ctx, credentials, open.StripePaymentIntentID)
 			if retrieveErr != nil || paymentIntent.Status != stripego.PaymentIntentStatusCanceled {
 				return fmt.Errorf("failed to cancel obsolete payment %d: %w", open.ID, err)
 			}
@@ -364,14 +365,16 @@ func ignoreForeignPayment(eventData *stripe.WebhookEventData, err error) error {
 }
 
 // RefundPayment refunds the payment, locked for the whole operation, so that
-// simultaneous refunds add up and never exceed the amount paid.
+// simultaneous refunds add up and never exceed the amount paid. A refund is
+// identified on Stripe by the payment, its amount and the amount refunded
+// before it: retried after its answer was lost, it is not made twice.
 func (s *paymentService) RefundPayment(paymentID uint, amount *int64, reason *string) error {
-	return s.paymentRepo.ForPayment(paymentID, func(payments dbmodel.PaymentRepository, payment *dbmodel.Payment) error {
-		return s.refund(payments, payment, amount)
+	return s.paymentRepo.ForPayment(paymentID, func(ctx context.Context, payments dbmodel.PaymentRepository, payment *dbmodel.Payment) error {
+		return s.refund(ctx, payments, payment, amount)
 	})
 }
 
-func (s *paymentService) refund(payments dbmodel.PaymentRepository, payment *dbmodel.Payment, amount *int64) error {
+func (s *paymentService) refund(ctx context.Context, payments dbmodel.PaymentRepository, payment *dbmodel.Payment, amount *int64) error {
 	if payment == nil {
 		return errors.New("payment not found")
 	}
@@ -394,14 +397,17 @@ func (s *paymentService) refund(payments dbmodel.PaymentRepository, payment *dbm
 		return err
 	}
 
-	// Process refund with Stripe
-	_, err = s.stripeService.RefundPayment(credentials, payment.StripePaymentIntentID, amount)
+	// Process refund with Stripe, keyed so that retrying a refund whose answer
+	// was lost refunds nothing more
+	refundedBefore := payment.RefundedAmount()
+	idempotencyKey := fmt.Sprintf("payment-%d-refund-%d-after-%d", payment.ID, *amount, refundedBefore)
+	refunded, err := s.stripeService.RefundPayment(ctx, credentials, payment.StripePaymentIntentID, *amount, idempotencyKey)
 	if err != nil {
 		return fmt.Errorf("failed to process refund: %w", err)
 	}
 
-	// Update payment record: the refunds add up, and the payment is refunded once entirely
-	refunded := payment.RefundedAmount() + *amount
+	// Update payment record with the amount refunded as Stripe knows it, which
+	// catches up on a refund not recorded, and the payment is refunded once entirely
 	payment.RefundAmount = &refunded
 	payment.Status = "partially_refunded"
 	if refunded >= payment.Amount {

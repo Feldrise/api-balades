@@ -1,6 +1,7 @@
 package testharness
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -103,7 +104,10 @@ type CreatedPaymentIntent struct {
 // Refund is a refund recorded by FakeStripeService.
 type Refund struct {
 	PaymentIntentID string
-	Amount          *int64
+	Amount          int64
+	// IdempotencyKey is the key the refund was made with: a refund with the
+	// same key refunds nothing more, as on Stripe.
+	IdempotencyKey string
 }
 
 // FakeStripeService records payment intents and refunds instead of calling Stripe.
@@ -137,7 +141,8 @@ func (s *FakeStripeService) SetCreationDelay(delay time.Duration) {
 }
 
 // SetRefundDelay makes refunds take delay, as a slow network does, so that
-// simultaneous requests overlap.
+// simultaneous requests overlap. A refund whose context ends first fails, but
+// is made all the same, as Stripe does once it received the request.
 func (s *FakeStripeService) SetRefundDelay(delay time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -157,11 +162,25 @@ func NewFakeStripeService() *FakeStripeService {
 	return &FakeStripeService{}
 }
 
-func (s *FakeStripeService) CreatePaymentIntent(credentials stripe.GuideStripeCredentials, amount int64, currency string, metadata map[string]string, idempotencyKey string) (*stripego.PaymentIntent, error) {
+// respond waits delay, as a slow network does, and fails if ctx ends first.
+func respond(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("stripe did not answer in time: %w", ctx.Err())
+	}
+}
+
+func (s *FakeStripeService) CreatePaymentIntent(ctx context.Context, credentials stripe.GuideStripeCredentials, amount int64, currency string, metadata map[string]string, idempotencyKey string) (*stripego.PaymentIntent, error) {
 	s.mu.Lock()
 	delay := s.creationDelay
 	s.mu.Unlock()
-	time.Sleep(delay)
+	if err := respond(ctx, delay); err != nil {
+		return nil, err
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -211,7 +230,7 @@ func (s *FakeStripeService) ConfirmPayment(credentials stripe.GuideStripeCredent
 	return &stripego.PaymentIntent{ID: paymentIntentID, Status: stripego.PaymentIntentStatusSucceeded}, nil
 }
 
-func (s *FakeStripeService) RetrievePaymentIntent(credentials stripe.GuideStripeCredentials, paymentIntentID string) (*stripego.PaymentIntent, error) {
+func (s *FakeStripeService) RetrievePaymentIntent(ctx context.Context, credentials stripe.GuideStripeCredentials, paymentIntentID string) (*stripego.PaymentIntent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -236,7 +255,7 @@ func (s *FakeStripeService) RetrievePaymentIntent(credentials stripe.GuideStripe
 
 // CancelPaymentIntent cancels the payment intent, and fails as Stripe does
 // when it is cancelled already.
-func (s *FakeStripeService) CancelPaymentIntent(credentials stripe.GuideStripeCredentials, paymentIntentID string) error {
+func (s *FakeStripeService) CancelPaymentIntent(ctx context.Context, credentials stripe.GuideStripeCredentials, paymentIntentID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -250,18 +269,24 @@ func (s *FakeStripeService) CancelPaymentIntent(credentials stripe.GuideStripeCr
 	return nil
 }
 
-func (s *FakeStripeService) RefundPayment(credentials stripe.GuideStripeCredentials, paymentIntentID string, amount *int64) (*stripego.Refund, error) {
+func (s *FakeStripeService) RefundPayment(ctx context.Context, credentials stripe.GuideStripeCredentials, paymentIntentID string, amount int64, idempotencyKey string) (int64, error) {
 	s.mu.Lock()
 	delay := s.refundDelay
+	if !slices.ContainsFunc(s.refunds, func(r Refund) bool { return r.IdempotencyKey == idempotencyKey }) {
+		s.refunds = append(s.refunds, Refund{PaymentIntentID: paymentIntentID, Amount: amount, IdempotencyKey: idempotencyKey})
+	}
+	var refunded int64
+	for _, r := range s.refunds {
+		if r.PaymentIntentID == paymentIntentID {
+			refunded += r.Amount
+		}
+	}
 	s.mu.Unlock()
-	time.Sleep(delay)
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.refunds = append(s.refunds, Refund{PaymentIntentID: paymentIntentID, Amount: amount})
-
-	return &stripego.Refund{ID: fmt.Sprintf("re_test_%d", len(s.refunds))}, nil
+	if err := respond(ctx, delay); err != nil {
+		return 0, err
+	}
+	return refunded, nil
 }
 
 // FakeWebhookSignature is the signature the fake Stripe service accepts for

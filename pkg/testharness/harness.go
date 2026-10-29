@@ -19,6 +19,7 @@ import (
 
 	"feldrise.com/balade/config"
 	"feldrise.com/balade/database"
+	"feldrise.com/balade/database/dbmodel"
 	"feldrise.com/balade/pkg/router"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -62,9 +63,20 @@ type Harness struct {
 	Clock  *FakeClock
 }
 
+// Option changes the API run by the harness.
+type Option func(services *config.Services)
+
+// WithPaymentTimeouts shortens the timeouts of the decisions on payments, so
+// that a test can outlast them.
+func WithPaymentTimeouts(timeouts dbmodel.PaymentTimeouts) Option {
+	return func(services *config.Services) {
+		services.PaymentTimeouts = timeouts
+	}
+}
+
 // New returns a harness on an emptied test database. The test is skipped when
 // TEST_DATABASE_URL is not set.
-func New(t *testing.T) *Harness {
+func New(t *testing.T, options ...Option) *Harness {
 	t.Helper()
 
 	db := openDatabase(t)
@@ -89,11 +101,15 @@ func New(t *testing.T) *Harness {
 		DataPath:       t.TempDir(),
 		ApplicationURL: applicationURL,
 	}
-	configuration := config.Build(constants, db, config.Services{
+	services := config.Services{
 		EmailService:  emails,
 		StripeService: stripe,
 		Clock:         clock,
-	})
+	}
+	for _, option := range options {
+		option(&services)
+	}
+	configuration := config.Build(constants, db, services)
 
 	return &Harness{
 		t:      t,

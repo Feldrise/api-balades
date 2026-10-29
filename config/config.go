@@ -68,6 +68,8 @@ type Services struct {
 	EmailService  email.EmailService
 	StripeService stripe.StripeService
 	Clock         clock.Clock
+	// PaymentTimeouts are shortened by tests, zero in production.
+	PaymentTimeouts dbmodel.PaymentTimeouts
 }
 
 func initViper(configName string) (Constants, error) {
@@ -164,7 +166,7 @@ func Build(constants Constants, databaseSession *gorm.DB, services Services) *Co
 	config.UserPermissionOverrideRepository = dbmodel.NewUserPermissionOverrideRepository(databaseSession)
 	config.UserRepository = dbmodel.NewUserRepository(databaseSession)
 	config.RoleRepository = dbmodel.NewRoleRepository(databaseSession)
-	config.PaymentRepository = dbmodel.NewPaymentRepository(databaseSession)
+	config.PaymentRepository = dbmodel.NewPaymentRepository(databaseSession, services.PaymentTimeouts)
 
 	config.EmailService = services.EmailService
 	config.Clock = services.Clock

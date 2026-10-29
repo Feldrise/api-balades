@@ -11,9 +11,22 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// paymentDecisionTimeout bounds a decision on the payments of a reservation,
-// which calls Stripe while the reservation is locked.
-const paymentDecisionTimeout = 30 * time.Second
+// PaymentTimeouts bound the decisions on payments, which call Stripe while the
+// reservation or the payment is locked. A zero duration is the default one.
+type PaymentTimeouts struct {
+	// Decision bounds the transaction of a decision (ForReservation, ForPayment).
+	Decision time.Duration
+}
+
+// defaultPaymentDecisionTimeout is the default PaymentTimeouts.Decision.
+const defaultPaymentDecisionTimeout = 30 * time.Second
+
+// decisionContext is the context of the external calls made by a decision
+// bounded by timeout: it ends before the transaction, with a sixth of timeout
+// left to record what Stripe answered, so that no call outlives the lock.
+func decisionContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, timeout-timeout/6)
+}
 
 type Payment struct {
 	gorm.Model
@@ -156,21 +169,27 @@ type PaymentRepository interface {
 	// the reservation as it is once locked, with its Ramble, Participants and
 	// Payments, and a repository bound to the transaction. The payments of a
 	// reservation are so decided one at a time. A deleted reservation comes with
-	// its payments only.
-	ForReservation(reservationID uint, decide func(payments PaymentRepository, reservation *Reservation) error) error
+	// its payments only. decide makes its calls to Stripe with ctx, which ends
+	// before the transaction.
+	ForReservation(reservationID uint, decide func(ctx context.Context, payments PaymentRepository, reservation *Reservation) error) error
 	// ForPayment locks the payment and runs decide in a transaction with the
 	// payment as it is once locked, with its Guide, and a repository bound to
 	// the transaction. The refunds of a payment are so decided one at a time.
-	// decide gets nil when the payment does not exist.
-	ForPayment(paymentID uint, decide func(payments PaymentRepository, payment *Payment) error) error
+	// decide gets nil when the payment does not exist. decide makes its calls
+	// to Stripe with ctx, which ends before the transaction.
+	ForPayment(paymentID uint, decide func(ctx context.Context, payments PaymentRepository, payment *Payment) error) error
 }
 
 type paymentRepository struct {
-	db *gorm.DB
+	db       *gorm.DB
+	timeouts PaymentTimeouts
 }
 
-func NewPaymentRepository(db *gorm.DB) PaymentRepository {
-	return &paymentRepository{db: db}
+func NewPaymentRepository(db *gorm.DB, timeouts PaymentTimeouts) PaymentRepository {
+	if timeouts.Decision == 0 {
+		timeouts.Decision = defaultPaymentDecisionTimeout
+	}
+	return &paymentRepository{db: db, timeouts: timeouts}
 }
 
 func (r *paymentRepository) FindByID(id uint) (*Payment, error) {
@@ -385,9 +404,11 @@ func (r *paymentRepository) GetTotalAmountByGuide(guideID uint, status string) (
 	return total, err
 }
 
-func (r *paymentRepository) ForReservation(reservationID uint, decide func(payments PaymentRepository, reservation *Reservation) error) error {
-	ctx, cancel := context.WithTimeout(context.Background(), paymentDecisionTimeout)
+func (r *paymentRepository) ForReservation(reservationID uint, decide func(ctx context.Context, payments PaymentRepository, reservation *Reservation) error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), r.timeouts.Decision)
 	defer cancel()
+	callCtx, cancelCalls := decisionContext(ctx, r.timeouts.Decision)
+	defer cancelCalls()
 
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var reservation Reservation
@@ -403,19 +424,21 @@ func (r *paymentRepository) ForReservation(reservationID uint, decide func(payme
 			return err
 		}
 
-		return decide(&paymentRepository{db: tx}, &reservation)
+		return decide(callCtx, &paymentRepository{db: tx, timeouts: r.timeouts}, &reservation)
 	})
 }
 
-func (r *paymentRepository) ForPayment(paymentID uint, decide func(payments PaymentRepository, payment *Payment) error) error {
-	ctx, cancel := context.WithTimeout(context.Background(), paymentDecisionTimeout)
+func (r *paymentRepository) ForPayment(paymentID uint, decide func(ctx context.Context, payments PaymentRepository, payment *Payment) error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), r.timeouts.Decision)
 	defer cancel()
+	callCtx, cancelCalls := decisionContext(ctx, r.timeouts.Decision)
+	defer cancelCalls()
 
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var payment Payment
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&payment, paymentID).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return decide(&paymentRepository{db: tx}, nil)
+			return decide(callCtx, &paymentRepository{db: tx, timeouts: r.timeouts}, nil)
 		}
 		if err != nil {
 			return err
@@ -423,6 +446,6 @@ func (r *paymentRepository) ForPayment(paymentID uint, decide func(payments Paym
 		if err := tx.First(&payment.Guide, payment.GuideID).Error; err != nil {
 			return err
 		}
-		return decide(&paymentRepository{db: tx}, &payment)
+		return decide(callCtx, &paymentRepository{db: tx, timeouts: r.timeouts}, &payment)
 	})
 }

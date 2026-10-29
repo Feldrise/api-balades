@@ -1,6 +1,7 @@
 package stripe
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -17,16 +18,21 @@ type GuideStripeCredentials struct {
 	WebhookSecret string
 }
 
+// StripeService calls Stripe. The calls taking a context give up once it ends:
+// Stripe may still have done what was asked.
 type StripeService interface {
 	// CreatePaymentIntent creates a payment intent. A creation with the
 	// idempotency key of a previous one gives back the same payment intent.
-	CreatePaymentIntent(credentials GuideStripeCredentials, amount int64, currency string, metadata map[string]string, idempotencyKey string) (*stripe.PaymentIntent, error)
+	CreatePaymentIntent(ctx context.Context, credentials GuideStripeCredentials, amount int64, currency string, metadata map[string]string, idempotencyKey string) (*stripe.PaymentIntent, error)
 	ConfirmPayment(credentials GuideStripeCredentials, paymentIntentID string) (*stripe.PaymentIntent, error)
 	// RetrievePaymentIntent returns the payment intent with its client secret.
-	RetrievePaymentIntent(credentials GuideStripeCredentials, paymentIntentID string) (*stripe.PaymentIntent, error)
+	RetrievePaymentIntent(ctx context.Context, credentials GuideStripeCredentials, paymentIntentID string) (*stripe.PaymentIntent, error)
 	// CancelPaymentIntent cancels a payment intent not paid yet, so that it can no longer be paid.
-	CancelPaymentIntent(credentials GuideStripeCredentials, paymentIntentID string) error
-	RefundPayment(credentials GuideStripeCredentials, paymentIntentID string, amount *int64) (*stripe.Refund, error)
+	CancelPaymentIntent(ctx context.Context, credentials GuideStripeCredentials, paymentIntentID string) error
+	// RefundPayment refunds amount cents of the payment intent, and returns the
+	// amount refunded on it so far, all refunds included, as Stripe knows it.
+	// A refund with the idempotency key of a previous one refunds nothing more.
+	RefundPayment(ctx context.Context, credentials GuideStripeCredentials, paymentIntentID string, amount int64, idempotencyKey string) (int64, error)
 	VerifyWebhookSignature(payload []byte, signature string, secret string) (*stripe.Event, error)
 	ProcessWebhookEvent(event *stripe.Event) (*WebhookEventData, error)
 }
@@ -43,7 +49,7 @@ func NewStripeService() StripeService {
 	return &stripeService{}
 }
 
-func (s *stripeService) CreatePaymentIntent(credentials GuideStripeCredentials, amount int64, currency string, metadata map[string]string, idempotencyKey string) (*stripe.PaymentIntent, error) {
+func (s *stripeService) CreatePaymentIntent(ctx context.Context, credentials GuideStripeCredentials, amount int64, currency string, metadata map[string]string, idempotencyKey string) (*stripe.PaymentIntent, error) {
 	// Set the API key for this specific guide
 	stripe.Key = credentials.SecretKey
 
@@ -51,6 +57,7 @@ func (s *stripeService) CreatePaymentIntent(credentials GuideStripeCredentials, 
 		Amount:   stripe.Int64(amount),
 		Currency: stripe.String(currency),
 		Params: stripe.Params{
+			Context:  ctx,
 			Metadata: metadata,
 		},
 		AutomaticPaymentMethods: &stripe.PaymentIntentAutomaticPaymentMethodsParams{
@@ -89,10 +96,10 @@ func (s *stripeService) ConfirmPayment(credentials GuideStripeCredentials, payme
 	return pi, nil
 }
 
-func (s *stripeService) RetrievePaymentIntent(credentials GuideStripeCredentials, paymentIntentID string) (*stripe.PaymentIntent, error) {
+func (s *stripeService) RetrievePaymentIntent(ctx context.Context, credentials GuideStripeCredentials, paymentIntentID string) (*stripe.PaymentIntent, error) {
 	stripe.Key = credentials.SecretKey
 
-	params := &stripe.PaymentIntentParams{}
+	params := &stripe.PaymentIntentParams{Params: stripe.Params{Context: ctx}}
 
 	if credentials.AccountID != "" {
 		params.SetStripeAccount(credentials.AccountID)
@@ -106,10 +113,10 @@ func (s *stripeService) RetrievePaymentIntent(credentials GuideStripeCredentials
 	return pi, nil
 }
 
-func (s *stripeService) CancelPaymentIntent(credentials GuideStripeCredentials, paymentIntentID string) error {
+func (s *stripeService) CancelPaymentIntent(ctx context.Context, credentials GuideStripeCredentials, paymentIntentID string) error {
 	stripe.Key = credentials.SecretKey
 
-	params := &stripe.PaymentIntentCancelParams{}
+	params := &stripe.PaymentIntentCancelParams{Params: stripe.Params{Context: ctx}}
 
 	if credentials.AccountID != "" {
 		params.SetStripeAccount(credentials.AccountID)
@@ -122,27 +129,40 @@ func (s *stripeService) CancelPaymentIntent(credentials GuideStripeCredentials, 
 	return nil
 }
 
-func (s *stripeService) RefundPayment(credentials GuideStripeCredentials, paymentIntentID string, amount *int64) (*stripe.Refund, error) {
+func (s *stripeService) RefundPayment(ctx context.Context, credentials GuideStripeCredentials, paymentIntentID string, amount int64, idempotencyKey string) (int64, error) {
 	stripe.Key = credentials.SecretKey
 
 	params := &stripe.RefundParams{
+		Params:        stripe.Params{Context: ctx},
 		PaymentIntent: stripe.String(paymentIntentID),
+		Amount:        stripe.Int64(amount),
 	}
-
-	if amount != nil {
-		params.Amount = stripe.Int64(*amount)
-	}
+	params.SetIdempotencyKey(idempotencyKey)
 
 	if credentials.AccountID != "" {
 		params.SetStripeAccount(credentials.AccountID)
 	}
 
-	refund, err := refund.New(params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create refund: %w", err)
+	if _, err := refund.New(params); err != nil {
+		return 0, fmt.Errorf("failed to create refund: %w", err)
 	}
 
-	return refund, nil
+	// The refund replayed for a reused idempotency key is as it was then: the
+	// amount refunded is read afresh on the charge.
+	retrieveParams := &stripe.PaymentIntentParams{Params: stripe.Params{Context: ctx}}
+	retrieveParams.AddExpand("latest_charge")
+	if credentials.AccountID != "" {
+		retrieveParams.SetStripeAccount(credentials.AccountID)
+	}
+	pi, err := paymentintent.Get(paymentIntentID, retrieveParams)
+	if err != nil {
+		return 0, fmt.Errorf("failed to retrieve the refunded amount: %w", err)
+	}
+	if pi.LatestCharge == nil {
+		return 0, fmt.Errorf("payment intent %s has no charge", paymentIntentID)
+	}
+
+	return pi.LatestCharge.AmountRefunded, nil
 }
 
 func (s *stripeService) VerifyWebhookSignature(payload []byte, signature string, secret string) (*stripe.Event, error) {

@@ -26,8 +26,17 @@ type SentEmail struct {
 type FakeEmailService struct {
 	templatesPath string
 
-	mu   sync.Mutex
-	sent []SentEmail
+	mu      sync.Mutex
+	sent    []SentEmail
+	failing bool
+}
+
+// SetFailing makes the sending of emails fail, as when the SMTP server is down.
+func (s *FakeEmailService) SetFailing(failing bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.failing = failing
 }
 
 func NewFakeEmailService(templatesPath string) *FakeEmailService {
@@ -42,6 +51,10 @@ func (s *FakeEmailService) Send(to string, subject string, templateName string, 
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if s.failing {
+		return errors.New("the SMTP server is down")
+	}
 
 	s.sent = append(s.sent, SentEmail{
 		To:       to,

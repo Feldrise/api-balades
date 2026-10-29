@@ -67,6 +67,8 @@ func TestSchedulerCancelsUnconfirmedReservationsAtTheDeadlineAndAdmitsTheWaiting
 	waiting := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "bob@example.com", Participants: people(2, "")})
 	alice := h.Login("alice@example.com")
 	bob := h.Login("bob@example.com")
+	h.Clock.Set(ramble.Date.Add(-3*24*time.Hour + time.Hour))
+	sendConfirmationRequests(t, h)
 
 	h.Clock.Set(ramble.Date.Add(-13 * time.Hour))
 	cancelUnconfirmedReservations(t, h)
@@ -417,5 +419,45 @@ func TestReservationOfACancelledRambleCannotBeConfirmedPaidOrGrown(t *testing.T)
 	}
 	if intents := h.Stripe.PaymentIntents(); len(intents) != 1 {
 		t.Errorf("expected no payment for a cancelled ramble, got %+v", intents)
+	}
+}
+
+func TestConfirmationRequestThatFailedToBeSentIsSentAtTheNextPass(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(testharness.RambleOptions{})
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(1, "")})
+
+	h.Clock.Set(ramble.Date.Add(-3*24*time.Hour + time.Hour))
+	h.Emails.SetFailing(true)
+	sendConfirmationRequests(t, h)
+	h.Emails.SetFailing(false)
+	h.Clock.Advance(time.Hour)
+	sendConfirmationRequests(t, h)
+
+	sent := h.Emails.SentWithTemplate("event_confirmation_request")
+	if len(sent) != 1 || sent[0].To != "alice@example.com" {
+		t.Fatalf("expected the confirmation request sent at the next pass, got %d", len(sent))
+	}
+	h.Clock.Set(ramble.Date.Add(-11 * time.Hour))
+	cancelUnconfirmedReservations(t, h)
+	if got := getReservation(t, h, created.ID, h.Login("alice@example.com")); got.Status != "cancelled" {
+		t.Errorf("expected the reservation told to confirm to be cancelled at the deadline, got %q", got.Status)
+	}
+}
+
+func TestReservationNeverToldToConfirmIsNotCancelledAtTheDeadline(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(testharness.RambleOptions{})
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(1, "")})
+	h.Emails.SetFailing(true)
+	for at := ramble.Date.Add(-3 * 24 * time.Hour); at.Before(ramble.Date.Add(-11 * time.Hour)); at = at.Add(time.Hour) {
+		h.Clock.Set(at)
+		sendConfirmationRequests(t, h)
+		cancelUnconfirmedReservations(t, h)
+	}
+	h.Emails.SetFailing(false)
+
+	if got := getReservation(t, h, created.ID, h.Login("alice@example.com")); got.Status != "pending" {
+		t.Errorf("expected the reservation never told to confirm to keep its places, got %q", got.Status)
 	}
 }

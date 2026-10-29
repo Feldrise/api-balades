@@ -262,14 +262,16 @@ type ReservationRepository interface {
 	// lock makes the capacity decisions of modify safe from concurrent changes.
 	ModifyForRamble(rambleID uint, modify func(locked *LockedRamble) error) error
 	// FindAwaitingConfirmationRequest returns the pending reservations not yet
-	// asked to confirm, whose ramble (not cancelled) takes place after from and up to until.
+	// asked to confirm (without confirmation deadline), whose ramble (not
+	// cancelled) takes place after from and up to until.
 	FindAwaitingConfirmationRequest(from time.Time, until time.Time) ([]Reservation, error)
-	// ClaimConfirmationRequest sets the confirmation deadline of the reservation
-	// if none is set yet, and reports whether it did: only one request is sent.
-	ClaimConfirmationRequest(id uint, deadline time.Time) (bool, error)
-	// FindPendingRambleOnOrBefore returns the pending reservations whose ramble
-	// takes place on or before date.
-	FindPendingRambleOnOrBefore(date time.Time) ([]Reservation, error)
+	// MarkConfirmationRequested sets the confirmation deadline of the reservation,
+	// once its booker has been sent the confirmation request: a reservation with
+	// a deadline has been asked to confirm.
+	MarkConfirmationRequested(id uint, deadline time.Time) error
+	// FindRequestedPendingRambleOnOrBefore returns the pending reservations
+	// asked to confirm whose ramble takes place on or before date.
+	FindRequestedPendingRambleOnOrBefore(date time.Time) ([]Reservation, error)
 }
 
 // LockedRamble gives the changes allowed on the reservations of a ramble while it is locked.
@@ -569,24 +571,23 @@ func (r *reservationRepository) FindAwaitingConfirmationRequest(from time.Time, 
 	return reservations, err
 }
 
-func (r *reservationRepository) ClaimConfirmationRequest(id uint, deadline time.Time) (bool, error) {
+func (r *reservationRepository) MarkConfirmationRequested(id uint, deadline time.Time) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	result := r.db.WithContext(ctx).Model(&Reservation{}).
+	return r.db.WithContext(ctx).Model(&Reservation{}).
 		Where("id = ? AND confirmation_deadline IS NULL", id).
-		Update("confirmation_deadline", deadline)
-	return result.RowsAffected == 1, result.Error
+		Update("confirmation_deadline", deadline).Error
 }
 
-func (r *reservationRepository) FindPendingRambleOnOrBefore(date time.Time) ([]Reservation, error) {
+func (r *reservationRepository) FindRequestedPendingRambleOnOrBefore(date time.Time) ([]Reservation, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	var reservations []Reservation
 	err := r.db.WithContext(ctx).
 		Joins("JOIN rambles ON rambles.id = reservations.ramble_id AND rambles.deleted_at IS NULL").
-		Where("reservations.status = ? AND rambles.date <= ?", ReservationStatusPending, date).
+		Where("reservations.status = ? AND reservations.confirmation_deadline IS NOT NULL AND rambles.date <= ?", ReservationStatusPending, date).
 		Order("reservations.created_at ASC").
 		Find(&reservations).Error
 	return reservations, err

@@ -16,7 +16,9 @@ const confirmationRequestPeriod = 3 * 24 * time.Hour
 const confirmationDeadlineBeforeRamble = 12 * time.Hour
 
 // SendConfirmationRequests asks the booker of each pending reservation whose
-// ramble takes place within the confirmation period to confirm it, once per reservation.
+// ramble takes place within the confirmation period to confirm it, once per
+// reservation. The request is marked as sent, by the confirmation deadline,
+// only once the email is sent: a failed request is sent again at the next pass.
 func (config *Config) SendConfirmationRequests(now time.Time) error {
 	reservations, err := config.ReservationRepository.FindAwaitingConfirmationRequest(
 		now.Add(confirmationDeadlineBeforeRamble),
@@ -30,21 +32,23 @@ func (config *Config) SendConfirmationRequests(now time.Time) error {
 		reservation := &reservations[i]
 		deadline := reservation.Ramble.Date.Add(-confirmationDeadlineBeforeRamble)
 
-		claimed, err := config.ReservationRepository.ClaimConfirmationRequest(reservation.ID, deadline)
-		if err != nil {
-			return err
+		if err := config.sendConfirmationRequest(reservation, deadline); err != nil {
+			log.Printf("Failed to send confirmation request for reservation %d, retrying at the next pass: %v", reservation.ID, err)
+			continue
 		}
-		if claimed {
-			config.sendConfirmationRequest(reservation, deadline)
+		if err := config.ReservationRepository.MarkConfirmationRequested(reservation.ID, deadline); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
 // CancelUnconfirmedReservations cancels entirely the reservations still pending
-// at their confirmation deadline, then admits the waiting list into the places released.
+// at their confirmation deadline, then admits the waiting list into the places
+// released. A reservation whose booker was never sent the confirmation request
+// (the email failed until the deadline) is not cancelled: it keeps its places.
 func (config *Config) CancelUnconfirmedReservations(now time.Time) error {
-	reservations, err := config.ReservationRepository.FindPendingRambleOnOrBefore(now.Add(confirmationDeadlineBeforeRamble))
+	reservations, err := config.ReservationRepository.FindRequestedPendingRambleOnOrBefore(now.Add(confirmationDeadlineBeforeRamble))
 	if err != nil {
 		return err
 	}
@@ -79,7 +83,7 @@ func (config *Config) CancelUnconfirmedReservations(now time.Time) error {
 	return nil
 }
 
-func (config *Config) sendConfirmationRequest(reservation *dbmodel.Reservation, deadline time.Time) {
+func (config *Config) sendConfirmationRequest(reservation *dbmodel.Reservation, deadline time.Time) error {
 	firstName, lastName := reservation.BookerName()
 	data := email.EventConfirmationRequestData{
 		FirstName:            firstName,
@@ -91,13 +95,10 @@ func (config *Config) sendConfirmationRequest(reservation *dbmodel.Reservation, 
 		ReservationURL:       fmt.Sprintf("%s/mes-reservations/%d", config.ApplicationURL, reservation.ID),
 	}
 
-	err := config.EmailService.Send(
+	return config.EmailService.Send(
 		reservation.ContactEmail,
 		"Confirmation requise - Balade Écologique",
 		"event_confirmation_request",
 		data,
 	)
-	if err != nil {
-		log.Printf("Failed to send confirmation request for reservation %d: %v", reservation.ID, err)
-	}
 }

@@ -87,7 +87,7 @@ func (config *Config) reactivable(locked *dbmodel.LockedRamble, id uint) (*dbmod
 }
 
 // deleteReservation deletes the reservation on behalf of an admin or a guide.
-// The places it held go to the waiting list.
+// The places it held go to the waiting list, and its open payments are cancelled.
 func (config *Config) deleteReservation(reservation *dbmodel.Reservation) (*modification, error) {
 	result := &modification{}
 	err := config.ReservationRepository.ModifyForRamble(reservation.RambleID, func(locked *dbmodel.LockedRamble) error {
@@ -107,7 +107,12 @@ func (config *Config) deleteReservation(reservation *dbmodel.Reservation) (*modi
 		}
 		return nil
 	})
-	return result, err
+	if err != nil {
+		return nil, err
+	}
+
+	config.cancelObsoletePayments(reservation)
+	return result, nil
 }
 
 // bulkActionStatuses are the statuses set by the bulk actions other than delete.

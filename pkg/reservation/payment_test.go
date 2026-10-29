@@ -357,3 +357,28 @@ func TestPaymentDeclinedOnceStaysPayableThenIsCancelledWithTheReservation(t *tes
 		t.Errorf("expected the declined payment cancelled, got %q", got.Status)
 	}
 }
+
+func TestOpenPaymentsAreCancelledWhenAnAdminDeletesTheReservation(t *testing.T) {
+	for _, bulk := range []bool{false, true} {
+		t.Run(fmt.Sprintf("bulk %v", bulk), func(t *testing.T) {
+			h := testharness.New(t)
+			ramble := h.CreateRamble(payingFamilyRamble())
+			created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+			openConfirmation(h, ramble)
+			confirmReservation(h, created.ID, h.Login("alice@example.com"))
+			admin := h.Token(h.CreateUser("admin@example.com", "admin"))
+
+			if bulk {
+				if result := adminBulk(t, h, bulkPayload{ReservationIDs: []uint{created.ID}, Action: "delete"}, admin); result.SuccessCount != 1 {
+					t.Fatalf("expected the deletion to succeed, got %+v", result)
+				}
+			} else if response := adminDelete(h, created.ID, admin); response.Code != http.StatusNoContent {
+				t.Fatalf("deleting: expected 204, got %d: %s", response.Code, response.Body)
+			}
+
+			if cancelled := h.Stripe.CancelledPaymentIntents(); len(cancelled) != 1 || cancelled[0] != h.Stripe.PaymentIntents()[0].ID {
+				t.Errorf("expected the open payment cancelled on Stripe, got %v", cancelled)
+			}
+		})
+	}
+}

@@ -177,7 +177,8 @@ func (s *paymentService) CancelObsoletePayments(reservation *dbmodel.Reservation
 // that no longer match what it owes.
 func (s *paymentService) cancelObsoletePayments(payments dbmodel.PaymentRepository, reservation *dbmodel.Reservation) error {
 	amountDue := reservation.AmountDue()
-	payable := reservation.Status == dbmodel.ReservationStatusConfirmed && !reservation.HasMissingPrices() && !reservation.Ramble.IsCancelled
+	payable := !reservation.DeletedAt.Valid && reservation.Status == dbmodel.ReservationStatusConfirmed &&
+		!reservation.HasMissingPrices() && !reservation.Ramble.IsCancelled
 
 	for i := range reservation.Payments {
 		open := &reservation.Payments[i]

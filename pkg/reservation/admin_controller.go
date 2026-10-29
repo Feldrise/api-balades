@@ -297,7 +297,7 @@ func (config *Config) reservationToAdminister(w http.ResponseWriter, r *http.Req
 }
 
 // @Summary Delete a reservation (admin)
-// @Description Delete a reservation with its participants. The places it held go to the waiting list.
+// @Description Delete a reservation with its participants. The places it held go to the waiting list, and its open payments are cancelled.
 // @Tags admin,reservations
 // @Produce json
 // @Param id path int true "Reservation ID"

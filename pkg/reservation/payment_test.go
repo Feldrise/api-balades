@@ -716,3 +716,34 @@ func TestSchedulerCancelsTheObsoletePaymentsOfAnActiveReservation(t *testing.T) 
 		t.Errorf("expected the obsolete payment recorded cancelled, got %+v", got.Payments)
 	}
 }
+
+func TestSimultaneousPartialRefundsAddUp(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	paid := h.PayReservation(created.ID, 10000)
+	admin := h.Token(h.CreateUser("admin@example.com", "admin"))
+	h.Stripe.SetRefundDelay(200 * time.Millisecond)
+
+	var wg sync.WaitGroup
+	responses := make([]*testharness.Response, 2)
+	for i, amount := range []int64{2000, 3000} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			responses[i] = refundPayment(h, paid.ID, int64Ptr(amount), admin)
+		}()
+	}
+	wg.Wait()
+	for i, response := range responses {
+		if response.Code != http.StatusOK {
+			t.Fatalf("refund %d: expected 200, got %d: %s", i, response.Code, response.Body)
+		}
+	}
+
+	var got refundedReservation
+	h.Do(http.MethodGet, fmt.Sprintf("/reservations/%d", created.ID), nil, h.Login("alice@example.com")).JSON(t, &got)
+	if p := got.Payments[0]; p.Status != "partially_refunded" || p.RefundAmount == nil || *p.RefundAmount != 5000 {
+		t.Errorf("expected 50,00 € refunded and the payment partially refunded, got %+v", p)
+	}
+}

@@ -363,11 +363,15 @@ func ignoreForeignPayment(eventData *stripe.WebhookEventData, err error) error {
 	return nil
 }
 
+// RefundPayment refunds the payment, locked for the whole operation, so that
+// simultaneous refunds add up and never exceed the amount paid.
 func (s *paymentService) RefundPayment(paymentID uint, amount *int64, reason *string) error {
-	payment, err := s.paymentRepo.FindByID(paymentID)
-	if err != nil {
-		return fmt.Errorf("failed to find payment: %w", err)
-	}
+	return s.paymentRepo.ForPayment(paymentID, func(payments dbmodel.PaymentRepository, payment *dbmodel.Payment) error {
+		return s.refund(payments, payment, amount)
+	})
+}
+
+func (s *paymentService) refund(payments dbmodel.PaymentRepository, payment *dbmodel.Payment, amount *int64) error {
 	if payment == nil {
 		return errors.New("payment not found")
 	}
@@ -406,8 +410,7 @@ func (s *paymentService) RefundPayment(paymentID uint, amount *int64, reason *st
 	now := time.Now()
 	payment.RefundedAt = &now
 
-	_, err = s.paymentRepo.Update(payment)
-	if err != nil {
+	if _, err := payments.Update(payment); err != nil {
 		return fmt.Errorf("failed to update payment record: %w", err)
 	}
 

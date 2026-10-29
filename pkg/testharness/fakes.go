@@ -115,6 +115,7 @@ type FakeStripeService struct {
 	unavailable    bool
 	cancelFailing  bool
 	creationDelay  time.Duration
+	refundDelay    time.Duration
 }
 
 // SetCancellationFailing makes the cancellation of payment intents fail, as
@@ -133,6 +134,15 @@ func (s *FakeStripeService) SetCreationDelay(delay time.Duration) {
 	defer s.mu.Unlock()
 
 	s.creationDelay = delay
+}
+
+// SetRefundDelay makes refunds take delay, as a slow network does, so that
+// simultaneous requests overlap.
+func (s *FakeStripeService) SetRefundDelay(delay time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.refundDelay = delay
 }
 
 // SetUnavailable makes the creation of payment intents fail, as when Stripe is unreachable.
@@ -241,6 +251,11 @@ func (s *FakeStripeService) CancelPaymentIntent(credentials stripe.GuideStripeCr
 }
 
 func (s *FakeStripeService) RefundPayment(credentials stripe.GuideStripeCredentials, paymentIntentID string, amount *int64) (*stripego.Refund, error) {
+	s.mu.Lock()
+	delay := s.refundDelay
+	s.mu.Unlock()
+	time.Sleep(delay)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

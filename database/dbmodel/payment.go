@@ -158,6 +158,11 @@ type PaymentRepository interface {
 	// reservation are so decided one at a time. A deleted reservation comes with
 	// its payments only.
 	ForReservation(reservationID uint, decide func(payments PaymentRepository, reservation *Reservation) error) error
+	// ForPayment locks the payment and runs decide in a transaction with the
+	// payment as it is once locked, with its Guide, and a repository bound to
+	// the transaction. The refunds of a payment are so decided one at a time.
+	// decide gets nil when the payment does not exist.
+	ForPayment(paymentID uint, decide func(payments PaymentRepository, payment *Payment) error) error
 }
 
 type paymentRepository struct {
@@ -399,5 +404,25 @@ func (r *paymentRepository) ForReservation(reservationID uint, decide func(payme
 		}
 
 		return decide(&paymentRepository{db: tx}, &reservation)
+	})
+}
+
+func (r *paymentRepository) ForPayment(paymentID uint, decide func(payments PaymentRepository, payment *Payment) error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), paymentDecisionTimeout)
+	defer cancel()
+
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var payment Payment
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&payment, paymentID).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return decide(&paymentRepository{db: tx}, nil)
+		}
+		if err != nil {
+			return err
+		}
+		if err := tx.First(&payment.Guide, payment.GuideID).Error; err != nil {
+			return err
+		}
+		return decide(&paymentRepository{db: tx}, &payment)
 	})
 }

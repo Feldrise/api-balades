@@ -67,6 +67,23 @@ func MigrateLegacyRegistrations(database *gorm.DB) error {
 		log.Printf("Migrated legacy registrations to reservations (groups: %d, registrations: %d)", len(groups), len(registrations))
 	}
 
+	return normalizeLegacyPartialRefunds(database)
+}
+
+// normalizeLegacyPartialRefunds marks partially refunded the payments the
+// legacy refunds marked refunded whatever the amount refunded. The legacy
+// refunds always recorded the amount refunded: a refunded payment without it
+// stays entirely refunded.
+func normalizeLegacyPartialRefunds(database *gorm.DB) error {
+	result := database.Model(&dbmodel.Payment{}).
+		Where("status = ? AND refund_amount IS NOT NULL AND refund_amount < amount", "refunded").
+		Update("status", "partially_refunded")
+	if result.Error != nil {
+		return fmt.Errorf("normalizing partial refunds: %w", result.Error)
+	}
+	if result.RowsAffected > 0 {
+		log.Printf("Marked %d legacy partial refunds partially refunded", result.RowsAffected)
+	}
 	return nil
 }
 

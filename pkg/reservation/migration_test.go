@@ -1,6 +1,7 @@
 package reservation_test
 
 import (
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -302,5 +303,40 @@ func TestMissingPricesOfAPaidMigratedReservationAreSpecifiedThenTheBalanceIsPaya
 	confirmReservation(h, migrated.ID, token).JSON(t, &balance)
 	if balance.HasMissingPrices || balance.Payment == nil || balance.Payment.Payment.Amount != 600 {
 		t.Errorf("expected the balance of 6,00 € (18,50 € minus 12,50 € paid) payable, got %+v", balance.Payment)
+	}
+}
+
+func TestStartupMarksTheLegacyPartialRefundsPartiallyRefunded(t *testing.T) {
+	h := testharness.New(t)
+	l := legacy{t, h}
+	ramble := h.CreateRamble(testharness.RambleOptions{
+		MaxParticipants: testharness.Int(10),
+		Prices:          []testharness.Price{{Label: "Plein tarif", Amount: 25}},
+	})
+	guide := h.CreateGuide(h.CreateUser("guide@example.com", "guide"), ramble)
+	partial := l.registration(ramble, "Alice", "alice@example.com", "confirmed", nil)
+	full := l.registration(ramble, "Bruno", "bruno@example.com", "confirmed", nil)
+	refunded := func(registrationID uint, refund int64) {
+		refundedAt := h.Clock.Now()
+		l.payment(guide, 2500, &registrationID, nil)
+		// The legacy refunds marked the payment refunded, whatever the amount refunded.
+		h.DB.Model(&dbmodel.Payment{}).Where("registration_id = ?", registrationID).
+			Updates(map[string]any{"status": "refunded", "refund_amount": refund, "refunded_at": refundedAt})
+	}
+	refunded(partial.ID, 1000)
+	refunded(full.ID, 2500)
+
+	h.MigrateAtStartup()
+	h.MigrateAtStartup()
+
+	var alice refundedReservation
+	h.Do(http.MethodGet, fmt.Sprintf("/reservations/%d", myReservations(t, h, "alice@example.com")[0].ID), nil, h.Login("alice@example.com")).JSON(t, &alice)
+	if p := alice.Payments[0]; p.Status != "partially_refunded" || alice.AmountPaid != 1500 || alice.AmountDue != 1000 {
+		t.Errorf("expected the payment partially refunded, 15,00 € kept, got %+v, paid %d, due %d", p, alice.AmountPaid, alice.AmountDue)
+	}
+	var bruno refundedReservation
+	h.Do(http.MethodGet, fmt.Sprintf("/reservations/%d", myReservations(t, h, "bruno@example.com")[0].ID), nil, h.Login("bruno@example.com")).JSON(t, &bruno)
+	if p := bruno.Payments[0]; p.Status != "refunded" || bruno.AmountPaid != 0 {
+		t.Errorf("expected the payment entirely refunded, got %+v, paid %d", p, bruno.AmountPaid)
 	}
 }

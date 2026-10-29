@@ -294,3 +294,148 @@ func (config *Config) reservationToAdminister(w http.ResponseWriter, r *http.Req
 
 	return reservation, true
 }
+
+// @Summary Delete a reservation (admin)
+// @Description Delete a reservation with its participants. The places it held go to the waiting list.
+// @Tags admin,reservations
+// @Produce json
+// @Param id path int true "Reservation ID"
+// @Success 204
+// @Failure 400 {object} errors.ErrResponse
+// @Failure 401 {object} errors.ErrResponse
+// @Failure 403 {object} errors.ErrResponse
+// @Failure 404 {object} errors.ErrResponse
+// @Failure 500 {object} errors.ErrResponse
+// @Router /reservations/admin/{id} [delete]
+func (config *Config) AdminDelete(w http.ResponseWriter, r *http.Request) {
+	user := authentication.ForContext(r.Context())
+	if user == nil {
+		render.Render(w, r, errors.ErrUnauthorized("authentication required"))
+		return
+	}
+
+	id, ok := parseID(w, r, "id")
+	if !ok {
+		return
+	}
+
+	reservation, ok := config.reservationToAdminister(w, r, user, id, "manage:registration", "manage:registration:self")
+	if !ok {
+		return
+	}
+
+	result, err := config.deleteReservation(reservation)
+	if err != nil {
+		render.Render(w, r, renderError(err))
+		return
+	}
+	config.notifyPromoted(result.promoted)
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// @Summary Bulk action on reservations (admin)
+// @Description Confirm, cancel, move to waiting list or delete several reservations. Each one follows the rules of the single actions, and fails separately.
+// @Tags admin,reservations
+// @Accept json
+// @Produce json
+// @Param bulk body model.BulkReservationActionPayload true "Bulk action data"
+// @Success 200 {object} model.BulkReservationActionResult
+// @Failure 400 {object} errors.ErrResponse
+// @Failure 401 {object} errors.ErrResponse
+// @Failure 403 {object} errors.ErrResponse
+// @Failure 500 {object} errors.ErrResponse
+// @Router /reservations/admin/bulk-action [post]
+func (config *Config) AdminBulkAction(w http.ResponseWriter, r *http.Request) {
+	user := authentication.ForContext(r.Context())
+	if user == nil {
+		render.Render(w, r, errors.ErrUnauthorized("authentication required"))
+		return
+	}
+
+	if !user.HasPermission("bulk:registration-actions") && !user.HasPermission("bulk:registration-actions:self") {
+		render.Render(w, r, errors.ErrForbidden("insufficient permissions"))
+		return
+	}
+
+	data := &model.BulkReservationActionPayload{}
+	if err := render.Bind(r, data); err != nil {
+		render.Render(w, r, errors.ErrInvalidRequest(err))
+		return
+	}
+
+	result := &model.BulkReservationActionResult{
+		Errors:  []model.BulkReservationActionError{},
+		Updated: []*model.Reservation{},
+	}
+	sendEmail := data.SendEmail != nil && *data.SendEmail
+
+	for _, id := range data.ReservationIDs {
+		updated, err := config.bulkAction(user, id, data, sendEmail)
+		if err != nil {
+			result.FailureCount++
+			result.Errors = append(result.Errors, model.BulkReservationActionError{ReservationID: id, Error: err.Error()})
+			continue
+		}
+
+		result.SuccessCount++
+		if updated != nil {
+			result.Updated = append(result.Updated, updated)
+		}
+	}
+
+	render.JSON(w, r, result)
+}
+
+// bulkAction applies the action of a bulk request to one reservation, and
+// returns the reservation as saved, nil when it is deleted.
+func (config *Config) bulkAction(user *dbmodel.User, id uint, data *model.BulkReservationActionPayload, sendEmail bool) (*model.Reservation, error) {
+	reservation, err := config.ReservationRepository.FindByID(id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find reservation: %w", err)
+	}
+	if reservation == nil {
+		return nil, fmt.Errorf("reservation not found")
+	}
+
+	canAct, err := config.canActOnRamble(user, reservation.RambleID, "bulk:registration-actions", "bulk:registration-actions:self")
+	if err != nil {
+		return nil, fmt.Errorf("permission check failed: %w", err)
+	}
+	if !canAct {
+		return nil, fmt.Errorf("insufficient permissions for this reservation")
+	}
+
+	if data.Action == "delete" {
+		canDelete, err := config.canActOnRamble(user, reservation.RambleID, "manage:registration", "manage:registration:self")
+		if err != nil {
+			return nil, fmt.Errorf("permission check failed: %w", err)
+		}
+		if !canDelete {
+			return nil, fmt.Errorf("insufficient permissions for delete action")
+		}
+
+		change, err := config.deleteReservation(reservation)
+		if err != nil {
+			return nil, err
+		}
+		config.notifyPromoted(change.promoted)
+		return nil, nil
+	}
+
+	change, err := config.setStatus(reservation, bulkActionStatuses[data.Action], data.Reason)
+	if err != nil {
+		return nil, err
+	}
+	config.notifyPromoted(change.promoted)
+
+	updated, err := config.ReservationRepository.FindByID(id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reload reservation: %w", err)
+	}
+	if change.changed && sendEmail {
+		config.sendReservationEmail(updated, changeStatusUpdated)
+	}
+
+	return updated.ToModel(), nil
+}

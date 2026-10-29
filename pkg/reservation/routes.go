@@ -17,6 +17,8 @@ func (config *Config) Routes() *chi.Mux {
 		r.Use(authentication.RequireAuthentication())
 		r.Get("/", config.AdminList)
 		r.Put("/{id}/status", config.AdminUpdateStatus)
+		r.Delete("/{id}", config.AdminDelete)
+		r.Post("/bulk-action", config.AdminBulkAction)
 	})
 
 	router.Post("/", config.Create)

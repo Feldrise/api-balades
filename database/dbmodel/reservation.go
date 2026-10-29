@@ -287,6 +287,20 @@ func (l *LockedRamble) CancelledReservation(id uint) (*Reservation, error) {
 	return &reservation, err
 }
 
+// Delete deletes the reservation, and so frees its places.
+func (l *LockedRamble) Delete(reservation *Reservation) error {
+	if err := l.tx.Delete(&Reservation{}, reservation.ID).Error; err != nil {
+		return err
+	}
+	for i := range l.Active {
+		if l.Active[i].ID == reservation.ID {
+			l.Active = append(l.Active[:i], l.Active[i+1:]...)
+			break
+		}
+	}
+	return nil
+}
+
 // AddParticipants saves participants as new participants of reservation.
 func (l *LockedRamble) AddParticipants(reservation *Reservation, participants []Participant) error {
 	for i := range participants {

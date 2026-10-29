@@ -85,3 +85,34 @@ func (config *Config) reactivable(locked *dbmodel.LockedRamble, id uint) (*dbmod
 
 	return cancelled, nil
 }
+
+// deleteReservation deletes the reservation on behalf of an admin or a guide.
+// The places it held go to the waiting list.
+func (config *Config) deleteReservation(reservation *dbmodel.Reservation) (*modification, error) {
+	result := &modification{}
+	err := config.ReservationRepository.ModifyForRamble(reservation.RambleID, func(locked *dbmodel.LockedRamble) error {
+		releasing := reservation.Status != dbmodel.ReservationStatusCancelled
+		if active := locked.Reservation(reservation.ID); active != nil {
+			releasing = active.TakesPlaces()
+		}
+
+		if err := locked.Delete(reservation); err != nil {
+			return err
+		}
+
+		if releasing {
+			promoted, err := config.promoteWaitingList(locked)
+			result.promoted = promoted
+			return err
+		}
+		return nil
+	})
+	return result, err
+}
+
+// bulkActionStatuses are the statuses set by the bulk actions other than delete.
+var bulkActionStatuses = map[string]string{
+	"confirm":         dbmodel.ReservationStatusConfirmed,
+	"cancel":          dbmodel.ReservationStatusCancelled,
+	"move_to_waiting": dbmodel.ReservationStatusWaitingList,
+}

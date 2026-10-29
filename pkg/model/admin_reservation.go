@@ -71,3 +71,41 @@ func (payload *AdminReservationStatusUpdatePayload) Bind(r *http.Request) error 
 
 	return nil
 }
+
+type BulkReservationActionPayload struct {
+	ReservationIDs []uint  `json:"reservation_ids"`
+	Action         string  `json:"action"` // "confirm", "cancel", "move_to_waiting", "delete"
+	Reason         *string `json:"reason,omitempty"`
+	SendEmail      *bool   `json:"send_email,omitempty"` // Whether to send the reservation summary to the bookers
+} // @name BulkReservationActionPayload
+
+func (payload *BulkReservationActionPayload) Bind(r *http.Request) error {
+	if len(payload.ReservationIDs) == 0 {
+		return errors.New("at least one reservation ID is required")
+	}
+
+	if len(payload.ReservationIDs) > 100 {
+		return errors.New("maximum 100 reservations can be processed at once")
+	}
+
+	switch payload.Action {
+	case "confirm", "cancel", "move_to_waiting", "delete":
+		return nil
+	case "":
+		return errors.New("action is required")
+	default:
+		return errors.New("invalid action. Valid actions are: confirm, cancel, move_to_waiting, delete")
+	}
+}
+
+type BulkReservationActionResult struct {
+	SuccessCount int                          `json:"success_count"`
+	FailureCount int                          `json:"failure_count"`
+	Errors       []BulkReservationActionError `json:"errors,omitempty"`
+	Updated      []*Reservation               `json:"updated,omitempty"`
+} // @name BulkReservationActionResult
+
+type BulkReservationActionError struct {
+	ReservationID uint   `json:"reservation_id"`
+	Error         string `json:"error"`
+} // @name BulkReservationActionError

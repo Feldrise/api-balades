@@ -470,3 +470,206 @@ func TestAdminStatusChangeRejectsUnknownStatusAndReservation(t *testing.T) {
 		t.Errorf("unknown reservation: expected 404, got %d", response.Code)
 	}
 }
+
+func adminDelete(h *testharness.Harness, id uint, token string) *testharness.Response {
+	return h.Do(http.MethodDelete, fmt.Sprintf("/reservations/admin/%d", id), nil, token)
+}
+
+func TestAdminDeletesAReservationAndAdmitsTheWaitingList(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(testharness.RambleOptions{MaxParticipants: testharness.Int(3)})
+	deleted := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "deleted@example.com", Participants: people(2, "")})
+	waiting := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "waiting@example.com", Participants: people(2, "")})
+	admin := h.Token(h.CreateUser("admin@example.com", "admin"))
+
+	response := adminDelete(h, deleted.ID, admin)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", response.Code, response.Body)
+	}
+	if gone := h.Do(http.MethodGet, fmt.Sprintf("/reservations/%d", deleted.ID), nil, admin); gone.Code != http.StatusNotFound {
+		t.Errorf("expected the reservation to be gone, got %d", gone.Code)
+	}
+	if admitted := getReservation(t, h, waiting.ID, admin); admitted.Status != "pending" {
+		t.Errorf("expected the waiting reservation to be admitted, got %q", admitted.Status)
+	}
+	if list := adminReservations(t, h, "", admin); list.Total != 1 {
+		t.Errorf("expected only the remaining reservation to be listed, got %d", list.Total)
+	}
+	if left := getRamble(t, h, ramble.ID).PlacesLeft; left == nil || *left != 1 {
+		t.Errorf("expected 1 place left, got %s", describe(left))
+	}
+}
+
+func TestAdminDeletesACancelledReservation(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(testharness.RambleOptions{})
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(1, "")})
+	cancelReservation(h, created.ID, h.Login("alice@example.com"))
+	admin := h.Token(h.CreateUser("admin@example.com", "admin"))
+
+	if response := adminDelete(h, created.ID, admin); response.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", response.Code, response.Body)
+	}
+	if list := adminReservations(t, h, "", admin); list.Total != 0 {
+		t.Errorf("expected no reservation left, got %d", list.Total)
+	}
+}
+
+func TestAdminDeletionIsRestrictedToAuthorizedStaff(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(testharness.RambleOptions{})
+	otherRamble := h.CreateRamble(testharness.RambleOptions{})
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(1, "")})
+	owningGuide := h.CreateUser("guide@example.com", "guide")
+	h.CreateGuide(owningGuide, ramble)
+	otherGuide := h.CreateUser("other-guide@example.com", "guide")
+	h.CreateGuide(otherGuide, otherRamble)
+
+	for _, c := range []struct {
+		name  string
+		id    uint
+		token string
+		code  int
+	}{
+		{"anonymous visitor", created.ID, "", http.StatusUnauthorized},
+		{"the booker", created.ID, h.Login("alice@example.com"), http.StatusForbidden},
+		{"guide of another ramble", created.ID, h.Token(otherGuide), http.StatusForbidden},
+		{"unknown reservation", 999, h.Token(owningGuide), http.StatusNotFound},
+		{"guide of the ramble", created.ID, h.Token(owningGuide), http.StatusNoContent},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if response := adminDelete(h, c.id, c.token); response.Code != c.code {
+				t.Fatalf("expected %d, got %d: %s", c.code, response.Code, response.Body)
+			}
+		})
+	}
+}
+
+type bulkPayload struct {
+	ReservationIDs []uint  `json:"reservation_ids"`
+	Action         string  `json:"action"`
+	Reason         *string `json:"reason,omitempty"`
+	SendEmail      bool    `json:"send_email,omitempty"`
+}
+
+type bulkResult struct {
+	SuccessCount int `json:"success_count"`
+	FailureCount int `json:"failure_count"`
+	Errors       []struct {
+		ReservationID uint   `json:"reservation_id"`
+		Error         string `json:"error"`
+	} `json:"errors"`
+	Updated []reservation `json:"updated"`
+}
+
+func adminBulk(t *testing.T, h *testharness.Harness, payload bulkPayload, token string) bulkResult {
+	t.Helper()
+
+	response := h.Do(http.MethodPost, "/reservations/admin/bulk-action", payload, token)
+	if response.Code != http.StatusOK {
+		t.Fatalf("POST /reservations/admin/bulk-action: expected 200, got %d: %s", response.Code, response.Body)
+	}
+	var result bulkResult
+	response.JSON(t, &result)
+	return result
+}
+
+func TestAdminBulkActionReportsEachReservationSeparately(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(testharness.RambleOptions{MaxParticipants: testharness.Int(3)})
+	pending := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "pending@example.com", Participants: people(2, "")})
+	waiting := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "waiting@example.com", Participants: people(2, "")})
+	admin := h.Token(h.CreateUser("admin@example.com", "admin"))
+
+	result := adminBulk(t, h, bulkPayload{ReservationIDs: []uint{pending.ID, waiting.ID, 999}, Action: "confirm"}, admin)
+
+	if result.SuccessCount != 1 || result.FailureCount != 2 || len(result.Errors) != 2 {
+		t.Fatalf("expected 1 success and 2 failures, got %+v", result)
+	}
+	if len(result.Updated) != 1 || result.Updated[0].ID != pending.ID || result.Updated[0].Status != "confirmed" {
+		t.Errorf("expected the first reservation confirmed, got %+v", result.Updated)
+	}
+	if result.Errors[0].ReservationID != waiting.ID || result.Errors[1].ReservationID != 999 {
+		t.Errorf("expected the failures of the waiting and the unknown reservations, got %+v", result.Errors)
+	}
+	if got := getReservation(t, h, waiting.ID, admin); got.Status != "waiting_list" {
+		t.Errorf("expected the reservation that does not fit to stay in waiting list, got %q", got.Status)
+	}
+}
+
+func TestAdminBulkCancellationAndDeletionAdmitTheWaitingList(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(testharness.RambleOptions{MaxParticipants: testharness.Int(4)})
+	first := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "first@example.com", Participants: people(2, "")})
+	second := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "second@example.com", Participants: people(2, "")})
+	waiting := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "waiting@example.com", Participants: people(3, "")})
+	admin := h.Token(h.CreateUser("admin@example.com", "admin"))
+	reason := "Balade reportée"
+
+	cancelled := adminBulk(t, h, bulkPayload{ReservationIDs: []uint{first.ID}, Action: "cancel", Reason: &reason}, admin)
+
+	if cancelled.SuccessCount != 1 || cancelled.Updated[0].Status != "cancelled" || *cancelled.Updated[0].CancellationReason != reason {
+		t.Fatalf("expected the reservation cancelled with its reason, got %+v", cancelled)
+	}
+	if got := getReservation(t, h, waiting.ID, admin); got.Status != "waiting_list" {
+		t.Errorf("expected 3 participants not to fit in the 2 places released, got %q", got.Status)
+	}
+
+	deleted := adminBulk(t, h, bulkPayload{ReservationIDs: []uint{second.ID}, Action: "delete"}, admin)
+
+	if deleted.SuccessCount != 1 || len(deleted.Updated) != 0 {
+		t.Fatalf("expected the reservation deleted, got %+v", deleted)
+	}
+	if got := getReservation(t, h, waiting.ID, admin); got.Status != "pending" {
+		t.Errorf("expected the waiting reservation to be admitted once 4 places are free, got %q", got.Status)
+	}
+}
+
+func TestAdminBulkMovesToTheWaitingListUnderTheSameRules(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(testharness.RambleOptions{MaxParticipants: testharness.Int(2)})
+	moved := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "moved@example.com", Participants: people(2, "")})
+	waiting := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "waiting@example.com", Participants: people(1, "")})
+	admin := h.Token(h.CreateUser("admin@example.com", "admin"))
+
+	result := adminBulk(t, h, bulkPayload{ReservationIDs: []uint{moved.ID}, Action: "move_to_waiting"}, admin)
+
+	if result.SuccessCount != 1 || result.Updated[0].Status != "waiting_list" {
+		t.Fatalf("expected the reservation in waiting list, got %+v", result)
+	}
+	if got := getReservation(t, h, waiting.ID, admin); got.Status != "pending" {
+		t.Errorf("expected the waiting reservation to take a place released, got %q", got.Status)
+	}
+}
+
+func TestAdminBulkActionIsRestrictedToAuthorizedStaffAndTheirRambles(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(testharness.RambleOptions{})
+	otherRamble := h.CreateRamble(testharness.RambleOptions{})
+	mine := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(1, "")})
+	others := reserve(t, h, reservationPayload{RambleID: otherRamble.ID, ContactEmail: "bob@example.com", Participants: people(1, "")})
+	guideUser := h.CreateUser("guide@example.com", "guide")
+	h.CreateGuide(guideUser, ramble)
+
+	body := bulkPayload{ReservationIDs: []uint{mine.ID}, Action: "confirm"}
+	if response := h.Do(http.MethodPost, "/reservations/admin/bulk-action", body, ""); response.Code != http.StatusUnauthorized {
+		t.Errorf("anonymous visitor: expected 401, got %d", response.Code)
+	}
+	if response := h.Do(http.MethodPost, "/reservations/admin/bulk-action", body, h.Login("alice@example.com")); response.Code != http.StatusForbidden {
+		t.Errorf("the booker: expected 403, got %d", response.Code)
+	}
+	if response := h.Do(http.MethodPost, "/reservations/admin/bulk-action", bulkPayload{ReservationIDs: []uint{mine.ID}, Action: "explode"}, h.Token(guideUser)); response.Code != http.StatusBadRequest {
+		t.Errorf("unknown action: expected 400, got %d", response.Code)
+	}
+
+	result := adminBulk(t, h, bulkPayload{ReservationIDs: []uint{mine.ID, others.ID}, Action: "delete"}, h.Token(guideUser))
+
+	if result.SuccessCount != 1 || result.FailureCount != 1 || result.Errors[0].ReservationID != others.ID {
+		t.Errorf("expected the guide to act on their ramble only, got %+v", result)
+	}
+	admin := h.Token(h.CreateUser("admin@example.com", "admin"))
+	if got := getReservation(t, h, others.ID, admin); got.Status != "pending" {
+		t.Errorf("expected the reservation of another ramble to be untouched, got %q", got.Status)
+	}
+}

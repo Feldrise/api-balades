@@ -136,9 +136,12 @@
                             style="padding: 20px 30px 20px 30px; color: #666666; font-family: 'Lato', Helvetica, Arial, sans-serif; font-size: 18px; font-weight: 400; line-height: 25px;">
                             <p style="margin: 0;">Bonjour,</p>
                             <br>
-                            {{if eq .Status "cancelled"}}
+                            {{if and (eq .Status "cancelled") (eq .Change "participants_removed")}}
                             <p style="margin: 0;">Le dernier participant a été retiré : votre réservation pour la
                                 balade écologique suivante est annulée.</p>
+                            {{else if eq .Status "cancelled"}}
+                            <p style="margin: 0;">L'organisateur a annulé votre réservation pour la balade écologique
+                                suivante.</p>
                             {{else if eq .Change "participants_added"}}
                             <p style="margin: 0;">Des participants ont été ajoutés à votre réservation. Elle compte
                                 désormais {{len .Participants}} participant{{if gt (len .Participants) 1}}s{{end}} pour

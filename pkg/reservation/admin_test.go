@@ -777,3 +777,21 @@ func TestAdminParticipantChangeIsValidatedAndRestrictedToAuthorizedStaff(t *test
 		})
 	}
 }
+
+func TestAdminCancellationEmailTellsTheReservationIsCancelledByTheOrganizer(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(familyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	admin := h.Token(h.CreateUser("admin@example.com", "admin"))
+
+	adminSetStatus(h, created.ID, statusPayload{Status: "cancelled", SendEmail: true}, admin)
+
+	sent := h.Emails.SentWithTemplate("reservation_confirmation")
+	body := sent[len(sent)-1].Body
+	if strings.Contains(body, "dernier participant") {
+		t.Errorf("expected the email not to tell that the last participant was removed")
+	}
+	if !strings.Contains(body, "L'organisateur a annulé votre réservation") {
+		t.Errorf("expected the email to tell that the organizer cancelled the reservation")
+	}
+}

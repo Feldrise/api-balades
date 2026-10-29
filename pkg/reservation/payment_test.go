@@ -3,6 +3,7 @@ package reservation_test
 import (
 	"fmt"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -284,5 +285,41 @@ func TestParticipantsAddedWhenThePaymentCannotBePreparedArePayableLater(t *testi
 	confirmReservation(h, created.ID, token).JSON(t, &later)
 	if later.Payment == nil || later.Payment.Payment.Amount != 600 {
 		t.Errorf("expected the complement of 6,00 € payable later, got %+v", later.Payment)
+	}
+}
+
+func TestSimultaneousConfirmationsPrepareASinglePayment(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	token := h.Login("alice@example.com")
+	openConfirmation(h, ramble)
+	h.Stripe.SetCreationDelay(200 * time.Millisecond)
+
+	responses := make([]reservationWithPayment, 2)
+	var wg sync.WaitGroup
+	for i := range responses {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response := confirmReservation(h, created.ID, token)
+			if response.Code != http.StatusOK {
+				t.Errorf("confirmation %d: expected 200, got %d: %s", i, response.Code, response.Body)
+				return
+			}
+			response.JSON(t, &responses[i])
+		}()
+	}
+	wg.Wait()
+
+	if intents := h.Stripe.PaymentIntents(); len(intents) != 1 || intents[0].IdempotencyKey == "" {
+		t.Fatalf("expected a single Stripe payment created with an idempotency key, got %+v", intents)
+	}
+	first, second := responses[0].Payment, responses[1].Payment
+	if first == nil || second == nil || first.Payment.ID != second.Payment.ID {
+		t.Errorf("expected both confirmations to give the same payment, got %+v and %+v", first, second)
+	}
+	if got := getReservation(t, h, created.ID, token); len(got.Payments) != 1 {
+		t.Errorf("expected a single payment recorded, got %+v", got.Payments)
 	}
 }

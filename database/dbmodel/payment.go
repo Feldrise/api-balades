@@ -7,7 +7,12 @@ import (
 
 	"feldrise.com/balade/pkg/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+// paymentDecisionTimeout bounds a decision on the payments of a reservation,
+// which calls Stripe while the reservation is locked.
+const paymentDecisionTimeout = 30 * time.Second
 
 type Payment struct {
 	gorm.Model
@@ -128,6 +133,12 @@ type PaymentRepository interface {
 	UpdateStatus(id uint, status string) error
 	Delete(id uint) error
 	GetTotalAmountByGuide(guideID uint, status string) (int64, error)
+	// ForReservation locks the reservation and runs decide in a transaction with
+	// the reservation as it is once locked, with its Ramble, Participants and
+	// Payments, and a repository bound to the transaction. The payments of a
+	// reservation are so decided one at a time. A deleted reservation comes with
+	// its payments only.
+	ForReservation(reservationID uint, decide func(payments PaymentRepository, reservation *Reservation) error) error
 }
 
 type paymentRepository struct {
@@ -338,4 +349,26 @@ func (r *paymentRepository) GetTotalAmountByGuide(guideID uint, status string) (
 		Scan(&total).Error
 
 	return total, err
+}
+
+func (r *paymentRepository) ForReservation(reservationID uint, decide func(payments PaymentRepository, reservation *Reservation) error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), paymentDecisionTimeout)
+	defer cancel()
+
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var reservation Reservation
+		if err := tx.Unscoped().Clauses(clause.Locking{Strength: "UPDATE"}).First(&reservation, reservationID).Error; err != nil {
+			return err
+		}
+
+		if reservation.DeletedAt.Valid {
+			if err := tx.Where("reservation_id = ?", reservationID).Order("created_at ASC").Find(&reservation.Payments).Error; err != nil {
+				return err
+			}
+		} else if err := preloadReservation(tx).First(&reservation, reservationID).Error; err != nil {
+			return err
+		}
+
+		return decide(&paymentRepository{db: tx}, &reservation)
+	})
 }

@@ -93,6 +93,9 @@ type CreatedPaymentIntent struct {
 	Amount      int64
 	Currency    string
 	Metadata    map[string]string
+	// IdempotencyKey is the key the payment intent was created with: a creation
+	// with the same key gives back this payment intent, as Stripe does.
+	IdempotencyKey string
 }
 
 // Refund is a refund recorded by FakeStripeService.
@@ -108,6 +111,16 @@ type FakeStripeService struct {
 	cancelled      []string
 	refunds        []Refund
 	unavailable    bool
+	creationDelay  time.Duration
+}
+
+// SetCreationDelay makes the creation of payment intents take delay, as a
+// slow network does, so that simultaneous requests overlap.
+func (s *FakeStripeService) SetCreationDelay(delay time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.creationDelay = delay
 }
 
 // SetUnavailable makes the creation of payment intents fail, as when Stripe is unreachable.
@@ -122,7 +135,12 @@ func NewFakeStripeService() *FakeStripeService {
 	return &FakeStripeService{}
 }
 
-func (s *FakeStripeService) CreatePaymentIntent(credentials stripe.GuideStripeCredentials, amount int64, currency string, metadata map[string]string) (*stripego.PaymentIntent, error) {
+func (s *FakeStripeService) CreatePaymentIntent(credentials stripe.GuideStripeCredentials, amount int64, currency string, metadata map[string]string, idempotencyKey string) (*stripego.PaymentIntent, error) {
+	s.mu.Lock()
+	delay := s.creationDelay
+	s.mu.Unlock()
+	time.Sleep(delay)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -130,13 +148,27 @@ func (s *FakeStripeService) CreatePaymentIntent(credentials stripe.GuideStripeCr
 		return nil, errors.New("stripe is unavailable")
 	}
 
+	for _, intent := range s.paymentIntents {
+		if idempotencyKey != "" && intent.IdempotencyKey == idempotencyKey {
+			return &stripego.PaymentIntent{
+				ID:           intent.ID,
+				Amount:       intent.Amount,
+				Currency:     stripego.Currency(intent.Currency),
+				ClientSecret: intent.ID + "_secret",
+				Status:       stripego.PaymentIntentStatusRequiresPaymentMethod,
+				Metadata:     intent.Metadata,
+			}, nil
+		}
+	}
+
 	id := fmt.Sprintf("pi_test_%d", len(s.paymentIntents)+1)
 	s.paymentIntents = append(s.paymentIntents, CreatedPaymentIntent{
-		ID:          id,
-		Credentials: credentials,
-		Amount:      amount,
-		Currency:    currency,
-		Metadata:    metadata,
+		ID:             id,
+		Credentials:    credentials,
+		Amount:         amount,
+		Currency:       currency,
+		Metadata:       metadata,
+		IdempotencyKey: idempotencyKey,
 	})
 
 	return &stripego.PaymentIntent{

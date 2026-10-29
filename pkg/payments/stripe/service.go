@@ -18,7 +18,9 @@ type GuideStripeCredentials struct {
 }
 
 type StripeService interface {
-	CreatePaymentIntent(credentials GuideStripeCredentials, amount int64, currency string, metadata map[string]string) (*stripe.PaymentIntent, error)
+	// CreatePaymentIntent creates a payment intent. A creation with the
+	// idempotency key of a previous one gives back the same payment intent.
+	CreatePaymentIntent(credentials GuideStripeCredentials, amount int64, currency string, metadata map[string]string, idempotencyKey string) (*stripe.PaymentIntent, error)
 	ConfirmPayment(credentials GuideStripeCredentials, paymentIntentID string) (*stripe.PaymentIntent, error)
 	// RetrievePaymentIntent returns the payment intent with its client secret.
 	RetrievePaymentIntent(credentials GuideStripeCredentials, paymentIntentID string) (*stripe.PaymentIntent, error)
@@ -41,7 +43,7 @@ func NewStripeService() StripeService {
 	return &stripeService{}
 }
 
-func (s *stripeService) CreatePaymentIntent(credentials GuideStripeCredentials, amount int64, currency string, metadata map[string]string) (*stripe.PaymentIntent, error) {
+func (s *stripeService) CreatePaymentIntent(credentials GuideStripeCredentials, amount int64, currency string, metadata map[string]string, idempotencyKey string) (*stripe.PaymentIntent, error) {
 	// Set the API key for this specific guide
 	stripe.Key = credentials.SecretKey
 
@@ -55,6 +57,7 @@ func (s *stripeService) CreatePaymentIntent(credentials GuideStripeCredentials, 
 			Enabled: stripe.Bool(true),
 		},
 	}
+	params.SetIdempotencyKey(idempotencyKey)
 
 	// If the guide has a connected account, use it
 	if credentials.AccountID != "" {

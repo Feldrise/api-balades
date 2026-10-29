@@ -16,13 +16,14 @@ import (
 
 type PaymentService interface {
 	// CreatePaymentForReservation creates the payment of the amount due by the
-	// reservation, which needs its Ramble, Participants and Payments loaded.
-	// It gives back the pending payment of the same amount, if any, rather than
-	// creating another one, and cancels the pending payments of other amounts.
+	// reservation, as it is once locked: the payments of a reservation are
+	// decided one at a time. It gives back the pending payment of the same
+	// amount, if any, rather than creating another one, and cancels the pending
+	// payments of other amounts.
 	CreatePaymentForReservation(reservation *dbmodel.Reservation, payerInfo PayerInfo) (*model.PaymentResponse, error)
 	// CancelObsoletePayments cancels, on Stripe too, the pending payments of the
-	// reservation that no longer match what it owes, so that they cannot be paid.
-	// The reservation needs its Ramble, Participants and Payments loaded.
+	// reservation, as it is once locked, that no longer match what it owes, so
+	// that they cannot be paid.
 	CancelObsoletePayments(reservation *dbmodel.Reservation) error
 	ProcessPaymentSuccess(paymentIntentID string) error
 	ProcessPaymentFailure(paymentIntentID string, failureReason ...string) error
@@ -61,6 +62,17 @@ func NewPaymentService(
 }
 
 func (s *paymentService) CreatePaymentForReservation(reservation *dbmodel.Reservation, payerInfo PayerInfo) (*model.PaymentResponse, error) {
+	var response *model.PaymentResponse
+	err := s.paymentRepo.ForReservation(reservation.ID, func(payments dbmodel.PaymentRepository, locked *dbmodel.Reservation) error {
+		var err error
+		response, err = s.createPayment(payments, locked, payerInfo)
+		return err
+	})
+	return response, err
+}
+
+// createPayment gives the payment of the amount due by the reservation, locked.
+func (s *paymentService) createPayment(payments dbmodel.PaymentRepository, reservation *dbmodel.Reservation, payerInfo PayerInfo) (*model.PaymentResponse, error) {
 	ramble := &reservation.Ramble
 	if !ramble.PaymentEnabled {
 		return nil, errors.New("payment is not enabled for this ramble")
@@ -95,7 +107,7 @@ func (s *paymentService) CreatePaymentForReservation(reservation *dbmodel.Reserv
 		}
 	}
 
-	if err := s.CancelObsoletePayments(reservation); err != nil {
+	if err := s.cancelObsoletePayments(payments, reservation); err != nil {
 		return nil, err
 	}
 
@@ -108,12 +120,16 @@ func (s *paymentService) CreatePaymentForReservation(reservation *dbmodel.Reserv
 		"payer_name":     payerInfo.Name,
 	}
 
-	paymentIntent, err := s.stripeService.CreatePaymentIntent(credentials, amountCents, "eur", metadata)
+	// The key changes with every payment recorded and with the amount due, so
+	// that a retry after a failure to record the payment gives back the same
+	// payment intent, and a new amount due a new one.
+	idempotencyKey := fmt.Sprintf("reservation-%d-payment-%d-amount-%d", reservationID, len(reservation.Payments)+1, amountCents)
+	paymentIntent, err := s.stripeService.CreatePaymentIntent(credentials, amountCents, "eur", metadata, idempotencyKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create payment intent: %w", err)
 	}
 
-	payment, err := s.paymentRepo.Create(&dbmodel.Payment{
+	payment, err := payments.Create(&dbmodel.Payment{
 		StripePaymentIntentID: paymentIntent.ID,
 		Amount:                amountCents,
 		Currency:              "eur",
@@ -136,6 +152,14 @@ func (s *paymentService) CreatePaymentForReservation(reservation *dbmodel.Reserv
 }
 
 func (s *paymentService) CancelObsoletePayments(reservation *dbmodel.Reservation) error {
+	return s.paymentRepo.ForReservation(reservation.ID, func(payments dbmodel.PaymentRepository, locked *dbmodel.Reservation) error {
+		return s.cancelObsoletePayments(payments, locked)
+	})
+}
+
+// cancelObsoletePayments cancels the pending payments of the reservation,
+// locked, that no longer match what it owes.
+func (s *paymentService) cancelObsoletePayments(payments dbmodel.PaymentRepository, reservation *dbmodel.Reservation) error {
 	amountDue := reservation.AmountDue()
 	payable := reservation.Status == dbmodel.ReservationStatusConfirmed && !reservation.HasMissingPrices() && !reservation.Ramble.IsCancelled
 
@@ -161,7 +185,7 @@ func (s *paymentService) CancelObsoletePayments(reservation *dbmodel.Reservation
 		}
 
 		pending.Status = "cancelled"
-		if err := s.paymentRepo.UpdateStatus(pending.ID, pending.Status); err != nil {
+		if err := payments.UpdateStatus(pending.ID, pending.Status); err != nil {
 			return fmt.Errorf("failed to update payment: %w", err)
 		}
 	}

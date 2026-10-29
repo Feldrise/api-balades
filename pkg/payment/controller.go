@@ -14,11 +14,6 @@ import (
 	"feldrise.com/balade/pkg/payments"
 )
 
-type PayerInfo struct {
-	Email string
-	Name  string
-}
-
 type Controller struct {
 	paymentService payments.PaymentService
 }
@@ -27,49 +22,6 @@ func NewController(paymentService payments.PaymentService) *Controller {
 	return &Controller{
 		paymentService: paymentService,
 	}
-}
-
-// CreatePayment creates a new payment intent for a registration or group
-// @Summary Create payment intent
-// @Description Create a new payment intent for a registration or group
-// @Tags payments
-// @Accept json
-// @Produce json
-// @Param payload body model.PaymentCreatePayload true "Payment creation payload"
-// @Success 200 {object} model.PaymentResponse
-// @Failure 400 {object} errors.ErrResponse
-// @Failure 500 {object} errors.ErrResponse
-// @Router /payments [post]
-func (pc *Controller) CreatePayment(w http.ResponseWriter, r *http.Request) {
-	var payload model.PaymentCreatePayload
-	if err := render.Bind(r, &payload); err != nil {
-		render.Render(w, r, errors.ErrInvalidRequest(err))
-		return
-	}
-
-	payerInfo := payments.PayerInfo{
-		Email: payload.PayerEmail,
-		Name:  payload.PayerName,
-	}
-
-	var response *model.PaymentResponse
-	var err error
-
-	if payload.RegistrationID != nil {
-		response, err = pc.paymentService.CreatePaymentForRegistration(*payload.RegistrationID, payload.PriceLabel, payerInfo, payload.ReturnURL)
-	} else if payload.GroupID != nil {
-		response, err = pc.paymentService.CreatePaymentForGroup(*payload.GroupID, payload.PriceLabel, payerInfo, payload.ReturnURL, payload.PriceSelections)
-	} else {
-		render.Render(w, r, errors.ErrInvalidRequest(fmt.Errorf("either registration_id or group_id is required")))
-		return
-	}
-
-	if err != nil {
-		render.Render(w, r, errors.ErrServerError(err))
-		return
-	}
-
-	render.JSON(w, r, response)
 }
 
 // GetPayment retrieves a payment by ID
@@ -189,58 +141,4 @@ func (pc *Controller) WebhookHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	render.JSON(w, r, map[string]string{"message": "Webhook processed successfully"})
-}
-
-// GetRegistrationPayments gets all payments for a registration
-// @Summary Get payments for registration
-// @Description Get all payments associated with a registration
-// @Tags payments
-// @Produce json
-// @Param registration_id path int true "Registration ID"
-// @Success 200 {array} model.Payment
-// @Failure 400 {object} errors.ErrResponse
-// @Failure 500 {object} errors.ErrResponse
-// @Router /registrations/{registration_id}/payments [get]
-func (pc *Controller) GetRegistrationPayments(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "registration_id")
-	id, err := strconv.ParseUint(idStr, 10, 32)
-	if err != nil {
-		render.Render(w, r, errors.ErrInvalidRequest(err))
-		return
-	}
-
-	payments, err := pc.paymentService.GetPaymentsByRegistration(uint(id))
-	if err != nil {
-		render.Render(w, r, errors.ErrServerError(err))
-		return
-	}
-
-	render.JSON(w, r, payments)
-}
-
-// GetGroupPayments gets all payments for a group
-// @Summary Get payments for group
-// @Description Get all payments associated with a group
-// @Tags payments
-// @Produce json
-// @Param group_id path int true "Group ID"
-// @Success 200 {array} model.Payment
-// @Failure 400 {object} errors.ErrResponse
-// @Failure 500 {object} errors.ErrResponse
-// @Router /groups/{group_id}/payments [get]
-func (pc *Controller) GetGroupPayments(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "group_id")
-	id, err := strconv.ParseUint(idStr, 10, 32)
-	if err != nil {
-		render.Render(w, r, errors.ErrInvalidRequest(err))
-		return
-	}
-
-	payments, err := pc.paymentService.GetPaymentsByGroup(uint(id))
-	if err != nil {
-		render.Render(w, r, errors.ErrServerError(err))
-		return
-	}
-
-	render.JSON(w, r, payments)
 }

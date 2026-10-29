@@ -33,7 +33,7 @@ type Reservation struct {
 	// cancellation, the booker is invited to contact the guide for a refund.
 	HasSuccessfulPayment bool `json:"has_successful_payment"`
 
-	Ramble *RambleRegistrationSummary `json:"ramble,omitempty"`
+	Ramble *ReservationRamble `json:"ramble,omitempty"`
 } // @name Reservation
 
 // ReservationWithPayment is a reservation with the payment the booker has to
@@ -42,6 +42,13 @@ type ReservationWithPayment struct {
 	*Reservation
 	Payment *PaymentResponse `json:"payment"`
 } // @name ReservationWithPayment
+
+// ReservationRamble is the ramble a reservation is for.
+type ReservationRamble struct {
+	Title    string     `json:"title"`
+	Date     *time.Time `json:"date"`
+	Location *string    `json:"location"`
+} // @name ReservationRamble
 
 type Participant struct {
 	ID         uint   `json:"id"`

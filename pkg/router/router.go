@@ -9,7 +9,6 @@ import (
 	apimiddleware "feldrise.com/balade/pkg/middleware"
 	"feldrise.com/balade/pkg/payment"
 	"feldrise.com/balade/pkg/ramble"
-	"feldrise.com/balade/pkg/registration"
 	"feldrise.com/balade/pkg/reservation"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
@@ -40,7 +39,6 @@ func New(configuration *config.Config) *chi.Mux {
 		r.Mount("/authentication", authentication.New(configuration).Routes())
 		r.Mount("/guides", guide.New(configuration).Routes())
 		r.Mount("/rambles", ramble.New(configuration).Routes())
-		r.Mount("/registrations", registration.New(configuration).Routes())
 		r.Mount("/reservations", reservation.New(configuration).Routes())
 		r.Mount("/payments", payment.Routes(configuration.PaymentService))
 	})

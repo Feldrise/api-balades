@@ -43,9 +43,7 @@ type Payment struct {
 	RefundAmount *int64 // Amount refunded in cents
 
 	// Foreign Objects
-	Registration *RambleRegistration      `gorm:"foreignKey:RegistrationID"`
-	Group        *RambleRegistrationGroup `gorm:"foreignKey:GroupID"`
-	Guide        Guide                    `gorm:"foreignKey:GuideID"`
+	Guide Guide `gorm:"foreignKey:GuideID"`
 }
 
 func (p Payment) ToModel() model.Payment {
@@ -72,36 +70,24 @@ func (p Payment) ToModel() model.Payment {
 		Guide:                 p.Guide.ToModel(),
 	}
 
-	if p.Registration != nil {
-		regModel := p.Registration.ToModel()
-		payment.Registration = regModel
-	}
-
-	if p.Group != nil {
-		groupModel := p.Group.ToModel()
-		payment.Group = groupModel
-	}
-
 	return payment
 }
 
 type PaymentFilter struct {
-	RegistrationID *uint
-	GroupID        *uint
-	GuideID        *uint
-	Status         *string
-	Statuses       []string
-	PayerEmail     *string
-	DateFrom       *time.Time
-	DateTo         *time.Time
-	AmountMin      *int64
-	AmountMax      *int64
-	Currency       *string
-	PaymentMethod  *string
-	Limit          *int
-	Offset         *int
-	SortBy         *string // "created_at", "amount", "paid_at"
-	SortOrder      *string // "asc", "desc"
+	GuideID       *uint
+	Status        *string
+	Statuses      []string
+	PayerEmail    *string
+	DateFrom      *time.Time
+	DateTo        *time.Time
+	AmountMin     *int64
+	AmountMax     *int64
+	Currency      *string
+	PaymentMethod *string
+	Limit         *int
+	Offset        *int
+	SortBy        *string // "created_at", "amount", "paid_at"
+	SortOrder     *string // "asc", "desc"
 }
 
 type PaymentRepository interface {
@@ -112,8 +98,6 @@ type PaymentRepository interface {
 	Create(payment *Payment) (*Payment, error)
 	Update(payment *Payment) (*Payment, error)
 	Delete(id uint) error
-	FindByRegistrationID(registrationID uint) ([]Payment, error)
-	FindByGroupID(groupID uint) ([]Payment, error)
 	GetTotalAmountByGuide(guideID uint, status string) (int64, error)
 }
 
@@ -131,8 +115,6 @@ func (r *paymentRepository) FindByID(id uint) (*Payment, error) {
 
 	var payment Payment
 	err := r.db.WithContext(ctx).
-		Preload("Registration").
-		Preload("Group").
 		Preload("Guide").
 		First(&payment, id).Error
 
@@ -152,8 +134,6 @@ func (r *paymentRepository) FindByStripePaymentIntentID(paymentIntentID string) 
 
 	var payment Payment
 	err := r.db.WithContext(ctx).
-		Preload("Registration").
-		Preload("Group").
 		Preload("Guide").
 		Where("stripe_payment_intent_id = ?", paymentIntentID).
 		First(&payment).Error
@@ -176,12 +156,6 @@ func (r *paymentRepository) FindAll(filter *PaymentFilter) ([]Payment, error) {
 	tx := r.db.WithContext(ctx).Model(&Payment{})
 
 	if filter != nil {
-		if filter.RegistrationID != nil {
-			tx = tx.Where("registration_id = ?", *filter.RegistrationID)
-		}
-		if filter.GroupID != nil {
-			tx = tx.Where("group_id = ?", *filter.GroupID)
-		}
 		if filter.GuideID != nil {
 			tx = tx.Where("guide_id = ?", *filter.GuideID)
 		}
@@ -244,9 +218,7 @@ func (r *paymentRepository) FindAll(filter *PaymentFilter) ([]Payment, error) {
 		tx = tx.Order("created_at DESC")
 	}
 
-	err := tx.Preload("Registration").
-		Preload("Group").
-		Preload("Guide").
+	err := tx.Preload("Guide").
 		Find(&payments).Error
 
 	return payments, err
@@ -260,12 +232,6 @@ func (r *paymentRepository) CountAll(filter *PaymentFilter) (int64, error) {
 	tx := r.db.WithContext(ctx).Model(&Payment{})
 
 	if filter != nil {
-		if filter.RegistrationID != nil {
-			tx = tx.Where("registration_id = ?", *filter.RegistrationID)
-		}
-		if filter.GroupID != nil {
-			tx = tx.Where("group_id = ?", *filter.GroupID)
-		}
 		if filter.GuideID != nil {
 			tx = tx.Where("guide_id = ?", *filter.GuideID)
 		}
@@ -323,34 +289,6 @@ func (r *paymentRepository) Delete(id uint) error {
 	defer cancel()
 
 	return r.db.WithContext(ctx).Delete(&Payment{}, id).Error
-}
-
-func (r *paymentRepository) FindByRegistrationID(registrationID uint) ([]Payment, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	var payments []Payment
-	err := r.db.WithContext(ctx).
-		Preload("Guide").
-		Where("registration_id = ?", registrationID).
-		Order("created_at DESC").
-		Find(&payments).Error
-
-	return payments, err
-}
-
-func (r *paymentRepository) FindByGroupID(groupID uint) ([]Payment, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	var payments []Payment
-	err := r.db.WithContext(ctx).
-		Preload("Guide").
-		Where("group_id = ?", groupID).
-		Order("created_at DESC").
-		Find(&payments).Error
-
-	return payments, err
 }
 
 func (r *paymentRepository) GetTotalAmountByGuide(guideID uint, status string) (int64, error) {

@@ -212,7 +212,7 @@ func (r *Reservation) ToModel() *model.Reservation {
 	}
 
 	if r.Ramble.ID != 0 {
-		reservation.Ramble = &model.RambleRegistrationSummary{
+		reservation.Ramble = &model.ReservationRamble{
 			Title:    r.Ramble.Title,
 			Date:     r.Ramble.Date,
 			Location: r.Ramble.Location,

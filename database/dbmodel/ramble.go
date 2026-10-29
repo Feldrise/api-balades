@@ -57,8 +57,7 @@ type Ramble struct {
 	Guides []Guide `gorm:"many2many:ramble_guides;"`
 
 	// Foreign Objects
-	Prices        []RamblePrice        `gorm:"foreignKey:RambleID;"`
-	Registrations []RambleRegistration `gorm:"foreignKey:RambleID;"`
+	Prices []RamblePrice `gorm:"foreignKey:RambleID;"`
 	// Reservations is loaded with the reservations taking places only.
 	Reservations []Reservation `gorm:"foreignKey:RambleID;"`
 	PaymentGuide *Guide        `gorm:"foreignKey:PaymentGuideID"`
@@ -171,15 +170,15 @@ func (rm Ramble) ToModel() model.Ramble {
 }
 
 type RambleFilter struct {
-	IsCancelled *bool // Filter by cancellation status
-	Type        *string
-	Difficulty  *string
-	Location    *string
-	Search      *string    // Search in title, description, location
-	DateFrom    *time.Time // Filter rambles from this date
-	DateTo      *time.Time // Filter rambles to this date
-	GuideID             *uint // Filter rambles by specific guide
-	IncludeUnpublished  bool  // When false, only return publicly visible rambles
+	IsCancelled        *bool // Filter by cancellation status
+	Type               *string
+	Difficulty         *string
+	Location           *string
+	Search             *string    // Search in title, description, location
+	DateFrom           *time.Time // Filter rambles from this date
+	DateTo             *time.Time // Filter rambles to this date
+	GuideID            *uint      // Filter rambles by specific guide
+	IncludeUnpublished bool       // When false, only return publicly visible rambles
 }
 
 type RambleRepository interface {
@@ -213,7 +212,7 @@ func (r *rambleRepository) FindByID(id uint, includeUnpublished bool) (*Ramble, 
 	tx := r.db.WithContext(ctx).Model(&ramble)
 	tx = applyPublishedFilter(tx, includeUnpublished)
 
-	tx = tx.Preload("Prices").Preload("Guides").Preload("Registrations").Preload("PaymentGuide")
+	tx = tx.Preload("Prices").Preload("Guides").Preload("PaymentGuide")
 	tx = preloadPlacesTaken(tx)
 
 	err := tx.First(&ramble, id).Error
@@ -277,7 +276,7 @@ func (r *rambleRepository) FindAll(filter *RambleFilter) ([]Ramble, error) {
 		}
 	}
 
-	tx = tx.Preload("Prices").Preload("Guides").Preload("Registrations").Preload("PaymentGuide")
+	tx = tx.Preload("Prices").Preload("Guides").Preload("PaymentGuide")
 	tx = preloadPlacesTaken(tx)
 
 	err := tx.Find(&rambles).Error

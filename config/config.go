@@ -49,15 +49,13 @@ type Config struct {
 	Constants
 
 	// Repositories
-	RambleRepository                  dbmodel.RambleRepository
-	RambleRegistrationRepository      dbmodel.RambleRegistrationRepository
-	RambleRegistrationGroupRepository dbmodel.RambleRegistrationGroupRepository
-	ReservationRepository             dbmodel.ReservationRepository
-	GuideRepository                   dbmodel.GuideRepository
-	UserPermissionOverrideRepository  dbmodel.UserPermissionOverrideRepository
-	UserRepository                    dbmodel.UserRepository
-	RoleRepository                    dbmodel.RoleRepository
-	PaymentRepository                 dbmodel.PaymentRepository
+	RambleRepository                 dbmodel.RambleRepository
+	ReservationRepository            dbmodel.ReservationRepository
+	GuideRepository                  dbmodel.GuideRepository
+	UserPermissionOverrideRepository dbmodel.UserPermissionOverrideRepository
+	UserRepository                   dbmodel.UserRepository
+	RoleRepository                   dbmodel.RoleRepository
+	PaymentRepository                dbmodel.PaymentRepository
 
 	// Services
 	EmailService   email.EmailService
@@ -161,8 +159,6 @@ func Build(constants Constants, databaseSession *gorm.DB, services Services) *Co
 	config := Config{Constants: constants}
 
 	config.RambleRepository = dbmodel.NewRambleRepository(databaseSession)
-	config.RambleRegistrationRepository = dbmodel.NewRambleRegistrationRepository(databaseSession)
-	config.RambleRegistrationGroupRepository = dbmodel.NewRambleRegistrationGroupRepository(databaseSession)
 	config.ReservationRepository = dbmodel.NewReservationRepository(databaseSession)
 	config.GuideRepository = dbmodel.NewGuideRepository(databaseSession)
 	config.UserPermissionOverrideRepository = dbmodel.NewUserPermissionOverrideRepository(databaseSession)
@@ -177,8 +173,6 @@ func Build(constants Constants, databaseSession *gorm.DB, services Services) *Co
 	encryptionService := security.NewEncryptionService(constants.JWTSecret)
 	config.PaymentService = payments.NewPaymentService(
 		config.PaymentRepository,
-		config.RambleRegistrationRepository,
-		config.RambleRegistrationGroupRepository,
 		config.RambleRepository,
 		config.GuideRepository,
 		services.StripeService,

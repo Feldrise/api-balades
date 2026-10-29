@@ -15,17 +15,13 @@ import (
 )
 
 type PaymentService interface {
-	CreatePaymentForRegistration(registrationID uint, priceLabel string, payerInfo PayerInfo, returnURL string) (*model.PaymentResponse, error)
 	// CreatePaymentForReservation creates the payment of the amount due by the
 	// reservation, which needs its Ramble, Participants and Payments loaded.
 	CreatePaymentForReservation(reservation *dbmodel.Reservation, payerInfo PayerInfo) (*model.PaymentResponse, error)
-	CreatePaymentForGroup(groupID uint, priceLabel string, payerInfo PayerInfo, returnURL string, priceSelections []model.PriceSelection) (*model.PaymentResponse, error)
 	ProcessPaymentSuccess(paymentIntentID string) error
 	ProcessPaymentFailure(paymentIntentID string, failureReason ...string) error
 	RefundPayment(paymentID uint, amount *int64, reason *string) error
 	GetPaymentByID(id uint) (*model.Payment, error)
-	GetPaymentsByRegistration(registrationID uint) ([]model.Payment, error)
-	GetPaymentsByGroup(groupID uint) ([]model.Payment, error)
 	VerifyWebhookAndProcess(payload []byte, signature string, guideID uint) error
 }
 
@@ -35,134 +31,27 @@ type PayerInfo struct {
 }
 
 type paymentService struct {
-	paymentRepo           dbmodel.PaymentRepository
-	registrationRepo      dbmodel.RambleRegistrationRepository
-	registrationGroupRepo dbmodel.RambleRegistrationGroupRepository
-	rambleRepo            dbmodel.RambleRepository
-	guideRepo             dbmodel.GuideRepository
-	stripeService         stripe.StripeService
-	encryptionService     security.EncryptionService
+	paymentRepo       dbmodel.PaymentRepository
+	rambleRepo        dbmodel.RambleRepository
+	guideRepo         dbmodel.GuideRepository
+	stripeService     stripe.StripeService
+	encryptionService security.EncryptionService
 }
 
 func NewPaymentService(
 	paymentRepo dbmodel.PaymentRepository,
-	registrationRepo dbmodel.RambleRegistrationRepository,
-	registrationGroupRepo dbmodel.RambleRegistrationGroupRepository,
 	rambleRepo dbmodel.RambleRepository,
 	guideRepo dbmodel.GuideRepository,
 	stripeService stripe.StripeService,
 	encryptionService security.EncryptionService,
 ) PaymentService {
 	return &paymentService{
-		paymentRepo:           paymentRepo,
-		registrationRepo:      registrationRepo,
-		registrationGroupRepo: registrationGroupRepo,
-		rambleRepo:            rambleRepo,
-		guideRepo:             guideRepo,
-		stripeService:         stripeService,
-		encryptionService:     encryptionService,
+		paymentRepo:       paymentRepo,
+		rambleRepo:        rambleRepo,
+		guideRepo:         guideRepo,
+		stripeService:     stripeService,
+		encryptionService: encryptionService,
 	}
-}
-
-func (s *paymentService) CreatePaymentForRegistration(registrationID uint, priceLabel string, payerInfo PayerInfo, returnURL string) (*model.PaymentResponse, error) {
-	// Get registration
-	registration, err := s.registrationRepo.FindByID(registrationID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find registration: %w", err)
-	}
-	if registration == nil {
-		return nil, errors.New("registration not found")
-	}
-
-	// Get ramble
-	ramble, err := s.rambleRepo.FindByID(registration.RambleID, true)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find ramble: %w", err)
-	}
-	if ramble == nil {
-		return nil, errors.New("ramble not found")
-	}
-
-	// Check if payment is enabled for this ramble
-	if !ramble.PaymentEnabled {
-		return nil, errors.New("payment is not enabled for this ramble")
-	}
-
-	// Find the price
-	var selectedPrice *dbmodel.RamblePrice
-	for _, price := range ramble.Prices {
-		if price.Label == priceLabel {
-			selectedPrice = &price
-			break
-		}
-	}
-	if selectedPrice == nil {
-		return nil, errors.New("price not found")
-	}
-
-	// Get payment guide
-	guide, err := s.getPaymentGuide(ramble)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check if payment already exists for this registration
-	existingPayments, err := s.paymentRepo.FindByRegistrationID(registrationID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check existing payments: %w", err)
-	}
-	for _, payment := range existingPayments {
-		if payment.Status == "succeeded" {
-			return nil, errors.New("payment already exists for this registration")
-		}
-	}
-
-	// Convert amount to cents
-	amountCents := int64(selectedPrice.Amount * 100)
-
-	// Get guide credentials
-	credentials, err := s.getGuideCredentials(guide)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create payment intent
-	metadata := map[string]string{
-		"registration_id": strconv.FormatUint(uint64(registrationID), 10),
-		"ramble_id":       strconv.FormatUint(uint64(ramble.ID), 10),
-		"price_label":     priceLabel,
-		"payer_email":     payerInfo.Email,
-		"payer_name":      payerInfo.Name,
-	}
-
-	paymentIntent, err := s.stripeService.CreatePaymentIntent(credentials, amountCents, "eur", metadata)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create payment intent: %w", err)
-	}
-
-	// Create payment record
-	payment := &dbmodel.Payment{
-		StripePaymentIntentID: paymentIntent.ID,
-		Amount:                amountCents,
-		Currency:              "eur",
-		Status:                "pending",
-		PaymentMethod:         "card",
-		RegistrationID:        &registrationID,
-		PayerEmail:            payerInfo.Email,
-		PayerName:             payerInfo.Name,
-		GuideID:               guide.ID,
-	}
-
-	payment, err = s.paymentRepo.Create(payment)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create payment record: %w", err)
-	}
-
-	return &model.PaymentResponse{
-		Payment:        payment.ToModel(),
-		ClientSecret:   paymentIntent.ClientSecret,
-		PublishableKey: *guide.StripePublicKey,
-	}, nil
 }
 
 func (s *paymentService) CreatePaymentForReservation(reservation *dbmodel.Reservation, payerInfo PayerInfo) (*model.PaymentResponse, error) {
@@ -211,155 +100,6 @@ func (s *paymentService) CreatePaymentForReservation(reservation *dbmodel.Reserv
 		PayerName:             payerInfo.Name,
 		GuideID:               guide.ID,
 	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create payment record: %w", err)
-	}
-
-	return &model.PaymentResponse{
-		Payment:        payment.ToModel(),
-		ClientSecret:   paymentIntent.ClientSecret,
-		PublishableKey: *guide.StripePublicKey,
-	}, nil
-}
-
-func (s *paymentService) CreatePaymentForGroup(groupID uint, priceLabel string, payerInfo PayerInfo, returnURL string, priceSelections []model.PriceSelection) (*model.PaymentResponse, error) {
-	// Get group
-	group, err := s.registrationGroupRepo.FindByID(groupID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find group: %w", err)
-	}
-	if group == nil {
-		return nil, errors.New("group not found")
-	}
-
-	// Get ramble
-	ramble, err := s.rambleRepo.FindByID(group.RambleID, true)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find ramble: %w", err)
-	}
-	if ramble == nil {
-		return nil, errors.New("ramble not found")
-	}
-
-	// Check if payment is enabled for this ramble
-	if !ramble.PaymentEnabled {
-		return nil, errors.New("payment is not enabled for this ramble")
-	}
-
-	// Get payment guide
-	guide, err := s.getPaymentGuide(ramble)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check if payment already exists for this group
-	existingPayments, err := s.paymentRepo.FindByGroupID(groupID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check existing payments: %w", err)
-	}
-	for _, payment := range existingPayments {
-		if payment.Status == "succeeded" {
-			return nil, errors.New("payment already exists for this group")
-		}
-	}
-
-	var amountCents int64
-	var metadata map[string]string
-
-	// Handle new price selections format or legacy single price
-	if len(priceSelections) > 0 {
-		// New format: multiple prices with quantities
-		priceBreakdown := make(map[string]int) // price_label -> quantity
-		totalAmount := 0.0
-
-		// Create a map of available prices for quick lookup
-		priceMap := make(map[string]*dbmodel.RamblePrice)
-		for i := range ramble.Prices {
-			priceMap[ramble.Prices[i].Label] = &ramble.Prices[i]
-		}
-
-		// Calculate total amount from all price selections
-		for _, selection := range priceSelections {
-			price, exists := priceMap[selection.PriceLabel]
-			if !exists {
-				return nil, fmt.Errorf("price '%s' not found for this ramble", selection.PriceLabel)
-			}
-			priceBreakdown[selection.PriceLabel] = selection.Quantity
-			totalAmount += price.Amount * float64(selection.Quantity)
-		}
-
-		amountCents = int64(totalAmount * 100)
-
-		// Build metadata with price breakdown
-		metadata = map[string]string{
-			"group_id":    strconv.FormatUint(uint64(groupID), 10),
-			"ramble_id":   strconv.FormatUint(uint64(ramble.ID), 10),
-			"payer_email": payerInfo.Email,
-			"payer_name":  payerInfo.Name,
-		}
-
-		// Add price breakdown to metadata
-		for label, qty := range priceBreakdown {
-			metadata["price_"+label] = strconv.Itoa(qty)
-		}
-	} else {
-		// Legacy format: single price label multiplied by participant count
-		var selectedPrice *dbmodel.RamblePrice
-		for i := range ramble.Prices {
-			if ramble.Prices[i].Label == priceLabel {
-				selectedPrice = &ramble.Prices[i]
-				break
-			}
-		}
-		if selectedPrice == nil {
-			return nil, errors.New("price not found")
-		}
-
-		// Calculate total amount (price * number of participants)
-		participantCount := len(group.Registrations)
-		if participantCount == 0 {
-			return nil, errors.New("no participants in group")
-		}
-
-		amountCents = int64(selectedPrice.Amount * float64(participantCount) * 100)
-
-		// Build metadata
-		metadata = map[string]string{
-			"group_id":          strconv.FormatUint(uint64(groupID), 10),
-			"ramble_id":         strconv.FormatUint(uint64(ramble.ID), 10),
-			"price_label":       priceLabel,
-			"participant_count": strconv.Itoa(participantCount),
-			"payer_email":       payerInfo.Email,
-			"payer_name":        payerInfo.Name,
-		}
-	}
-
-	// Get guide credentials
-	credentials, err := s.getGuideCredentials(guide)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create payment intent
-	paymentIntent, err := s.stripeService.CreatePaymentIntent(credentials, amountCents, "eur", metadata)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create payment intent: %w", err)
-	}
-
-	// Create payment record
-	payment := &dbmodel.Payment{
-		StripePaymentIntentID: paymentIntent.ID,
-		Amount:                amountCents,
-		Currency:              "eur",
-		Status:                "pending",
-		PaymentMethod:         "card",
-		GroupID:               &groupID,
-		PayerEmail:            payerInfo.Email,
-		PayerName:             payerInfo.Name,
-		GuideID:               guide.ID,
-	}
-
-	payment, err = s.paymentRepo.Create(payment)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create payment record: %w", err)
 	}
@@ -472,34 +212,6 @@ func (s *paymentService) GetPaymentByID(id uint) (*model.Payment, error) {
 
 	paymentModel := payment.ToModel()
 	return &paymentModel, nil
-}
-
-func (s *paymentService) GetPaymentsByRegistration(registrationID uint) ([]model.Payment, error) {
-	payments, err := s.paymentRepo.FindByRegistrationID(registrationID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find payments: %w", err)
-	}
-
-	paymentModels := make([]model.Payment, len(payments))
-	for i, payment := range payments {
-		paymentModels[i] = payment.ToModel()
-	}
-
-	return paymentModels, nil
-}
-
-func (s *paymentService) GetPaymentsByGroup(groupID uint) ([]model.Payment, error) {
-	payments, err := s.paymentRepo.FindByGroupID(groupID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find payments: %w", err)
-	}
-
-	paymentModels := make([]model.Payment, len(payments))
-	for i, payment := range payments {
-		paymentModels[i] = payment.ToModel()
-	}
-
-	return paymentModels, nil
 }
 
 func (s *paymentService) VerifyWebhookAndProcess(payload []byte, signature string, guideID uint) error {

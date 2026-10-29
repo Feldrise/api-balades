@@ -519,3 +519,38 @@ func TestViewingPermissionsDoNotAllowModifyingAReservation(t *testing.T) {
 		t.Errorf("expected the reservation untouched, got %q with %d participants", got.Status, len(got.Participants))
 	}
 }
+
+func TestRaisingTheCapacityOfARambleAdmitsTheWaitingList(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(testharness.RambleOptions{MaxParticipants: testharness.Int(2)})
+	reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "")})
+	bob := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "bob@example.com", Participants: people(2, "")})
+	carol := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "carol@example.com", Participants: people(2, "")})
+	admin := h.Token(h.CreateUser("admin@example.com", "admin"))
+	updateCapacity := func(maxParticipants any) {
+		t.Helper()
+		response := h.Do(http.MethodPut, fmt.Sprintf("/rambles/%d", ramble.ID), map[string]any{"max_participants": maxParticipants}, admin)
+		if response.Code != http.StatusOK {
+			t.Fatalf("updating the ramble: expected 200, got %d: %s", response.Code, response.Body)
+		}
+	}
+
+	updateCapacity(5)
+
+	if got := getReservation(t, h, bob.ID, h.Login("bob@example.com")); got.Status != "pending" {
+		t.Errorf("expected bob's reservation admitted in the places added, got %q", got.Status)
+	}
+	if got := getReservation(t, h, carol.ID, h.Login("carol@example.com")); got.Status != "waiting_list" {
+		t.Errorf("expected carol's reservation to keep waiting, got %q", got.Status)
+	}
+	sent := h.Emails.SentWithTemplate("reservation_confirmation")
+	if last := sent[len(sent)-1]; last.To != "bob@example.com" || !strings.Contains(last.Subject, "Place disponible") {
+		t.Errorf("expected bob to be told a place is available, got %q to %q", last.Subject, last.To)
+	}
+
+	updateCapacity(nil)
+
+	if got := getReservation(t, h, carol.ID, h.Login("carol@example.com")); got.Status != "pending" {
+		t.Errorf("expected carol's reservation admitted once the ramble is unlimited, got %q", got.Status)
+	}
+}

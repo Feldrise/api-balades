@@ -225,6 +225,27 @@ func (config *Config) cancel(locked *dbmodel.LockedRamble, reservation *dbmodel.
 	return locked.SaveStatus(reservation)
 }
 
+// AdmitWaitingList admits, under the lock of the ramble, the reservations in
+// waiting list that fit in its places left, as after a raise of its capacity,
+// and tells their bookers.
+func (config *Config) AdmitWaitingList(rambleID uint) error {
+	var promoted []uint
+	err := config.ReservationRepository.ModifyForRamble(rambleID, func(locked *dbmodel.LockedRamble) error {
+		if locked.Ramble.IsCancelled {
+			return nil
+		}
+		var err error
+		promoted, err = config.promoteWaitingList(locked)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+
+	config.notifyPromoted(promoted)
+	return nil
+}
+
 // promoteWaitingList goes through the reservations in waiting list by creation
 // date and admits each one that fits entirely in the places left, never splitting
 // a reservation. It returns the admitted reservations. The reservations of the

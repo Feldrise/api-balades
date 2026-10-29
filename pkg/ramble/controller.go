@@ -13,6 +13,7 @@ import (
 	"feldrise.com/balade/pkg/authentication"
 	"feldrise.com/balade/pkg/errors"
 	"feldrise.com/balade/pkg/model"
+	"feldrise.com/balade/pkg/reservation"
 	"feldrise.com/balade/pkg/notifications/email"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/render"
@@ -406,6 +407,11 @@ func (config *Config) Update(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		render.Render(w, r, errors.ErrServerError(err))
 		return
+	}
+
+	// A raised or removed capacity gives places to the waiting list.
+	if err := reservation.New(config.Config).AdmitWaitingList(dbRamble.ID); err != nil {
+		log.Printf("Failed to admit the waiting list of ramble %d: %v", dbRamble.ID, err)
 	}
 
 	render.JSON(w, r, dbRamble.ToModel())

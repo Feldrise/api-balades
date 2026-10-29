@@ -635,3 +635,19 @@ func TestPaymentNotRecordedIsPreparedAgainAfterTheBookerNameChanges(t *testing.T
 		t.Errorf("expected the payment of 25,00 € prepared, got %+v, unavailable %v", again.Payment, again.PaymentUnavailable)
 	}
 }
+
+func TestWebhookOnAPaymentUnknownIsRetriedOnlyWhenItIsAReservationPayment(t *testing.T) {
+	for _, event := range []string{"payment_intent.succeeded", "payment_intent.payment_failed", "payment_intent.canceled", "payment_intent.requires_action"} {
+		t.Run(event, func(t *testing.T) {
+			h := testharness.New(t)
+			ramble := h.CreateRamble(payingFamilyRamble())
+
+			if response := h.SendStripeWebhookWithMetadata(*ramble.PaymentGuideID, event, "pi_other_app", map[string]string{"order": "42"}); response.Code != http.StatusOK {
+				t.Errorf("payment of another application: expected 200, got %d: %s", response.Code, response.Body)
+			}
+			if response := h.SendStripeWebhookWithMetadata(*ramble.PaymentGuideID, event, "pi_not_recorded_yet", map[string]string{"reservation_id": "1"}); response.Code == http.StatusOK {
+				t.Errorf("reservation payment not recorded yet: expected an error for Stripe to deliver it again, got 200")
+			}
+		})
+	}
+}

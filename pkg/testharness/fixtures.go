@@ -291,12 +291,20 @@ func (h *Harness) CreateUserWithPermissions(address string, permissions ...strin
 func (h *Harness) SendStripeWebhook(guideID uint, eventType string, paymentIntentID string) *Response {
 	h.t.Helper()
 
+	return h.SendStripeWebhookWithMetadata(guideID, eventType, paymentIntentID, nil)
+}
+
+// SendStripeWebhookWithMetadata sends the paying guide's webhook a Stripe
+// event on the payment intent, which carries metadata.
+func (h *Harness) SendStripeWebhookWithMetadata(guideID uint, eventType string, paymentIntentID string, metadata map[string]string) *Response {
+	h.t.Helper()
+
 	event := map[string]any{
 		"id":     fmt.Sprintf("evt_%s_%s", eventType, paymentIntentID),
 		"object": "event",
 		"type":   eventType,
 		"data": map[string]any{
-			"object": map[string]any{"id": paymentIntentID, "object": "payment_intent"},
+			"object": map[string]any{"id": paymentIntentID, "object": "payment_intent", "metadata": metadata},
 		},
 	}
 	encoded, err := json.Marshal(event)

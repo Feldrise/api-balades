@@ -307,8 +307,26 @@ func (s *paymentService) recordStatus(paymentIntentID string, kept []string, cha
 		return fmt.Errorf("failed to find payment: %w", err)
 	}
 	if payment == nil {
-		return errors.New("payment not found")
+		return errPaymentNotFound
 	}
+	return nil
+}
+
+var errPaymentNotFound = errors.New("payment not found")
+
+// ignoreForeignPayment ignores the failure to find the payment of the event when
+// its payment intent was not created by the application (it has no reservation
+// in its metadata), as another application on the same Stripe account may
+// create some. A reservation payment not recorded yet fails, so that Stripe
+// delivers the event again.
+func ignoreForeignPayment(eventData *stripe.WebhookEventData, err error) error {
+	if !errors.Is(err, errPaymentNotFound) || eventData.PaymentIntentData == nil {
+		return err
+	}
+	if _, ok := eventData.PaymentIntentData.Metadata["reservation_id"]; ok {
+		return err
+	}
+	log.Printf("Ignoring webhook event %s on payment intent %s, not created by the application", eventData.EventType, eventData.PaymentIntentID)
 	return nil
 }
 
@@ -417,7 +435,7 @@ func (s *paymentService) VerifyWebhookAndProcess(payload []byte, signature strin
 	// Update payment status based on event type
 	switch eventData.EventType {
 	case "payment_intent.succeeded":
-		err = s.ProcessPaymentSuccess(eventData.PaymentIntentID)
+		err = ignoreForeignPayment(eventData, s.ProcessPaymentSuccess(eventData.PaymentIntentID))
 		if err != nil {
 			log.Printf("Failed to process payment success for %s: %v", eventData.PaymentIntentID, err)
 			return err
@@ -434,7 +452,7 @@ func (s *paymentService) VerifyWebhookAndProcess(payload []byte, signature strin
 			failureReason = "Payment failed"
 		}
 
-		err = s.ProcessPaymentFailure(eventData.PaymentIntentID, failureReason)
+		err = ignoreForeignPayment(eventData, s.ProcessPaymentFailure(eventData.PaymentIntentID, failureReason))
 		if err != nil {
 			log.Printf("Failed to process payment failure for %s: %v", eventData.PaymentIntentID, err)
 			return err
@@ -442,7 +460,7 @@ func (s *paymentService) VerifyWebhookAndProcess(payload []byte, signature strin
 		log.Printf("Successfully processed payment failure for %s", eventData.PaymentIntentID)
 
 	case "payment_intent.canceled":
-		err = s.closePayment(eventData.PaymentIntentID, "cancelled", "Payment canceled")
+		err = ignoreForeignPayment(eventData, s.closePayment(eventData.PaymentIntentID, "cancelled", "Payment canceled"))
 		if err != nil {
 			log.Printf("Failed to process payment cancellation for %s: %v", eventData.PaymentIntentID, err)
 			return err
@@ -450,7 +468,7 @@ func (s *paymentService) VerifyWebhookAndProcess(payload []byte, signature strin
 		log.Printf("Successfully processed payment cancellation for %s", eventData.PaymentIntentID)
 
 	case "payment_intent.requires_action":
-		err = s.recordStatus(eventData.PaymentIntentID, uncollectedOnly, map[string]any{"status": "requires_action"})
+		err = ignoreForeignPayment(eventData, s.recordStatus(eventData.PaymentIntentID, uncollectedOnly, map[string]any{"status": "requires_action"}))
 		if err != nil {
 			log.Printf("Failed to update payment status to requires_action for %s: %v", eventData.PaymentIntentID, err)
 			return err

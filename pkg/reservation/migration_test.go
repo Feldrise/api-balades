@@ -7,6 +7,7 @@ import (
 
 	"feldrise.com/balade/database/dbmodel"
 	"feldrise.com/balade/pkg/testharness"
+	"gorm.io/gorm"
 )
 
 // Legacy registrations and groups are inserted directly: their routes are
@@ -269,5 +270,37 @@ func TestStartupMigrationIsIdempotent(t *testing.T) {
 	}
 	if left := getRamble(t, h, ramble.ID).PlacesLeft; left == nil || *left != 7 {
 		t.Errorf("expected 7 places left, got %s", describe(left))
+	}
+}
+
+func TestMissingPricesOfAPaidMigratedReservationAreSpecifiedThenTheBalanceIsPayable(t *testing.T) {
+	h := testharness.New(t)
+	l := legacy{t, h}
+	ramble := h.CreateRamble(payingFamilyRamble())
+	group := l.group(ramble, "parent@example.com", "confirmed")
+	l.registration(ramble, "Paul", "parent@example.com", "confirmed", &group.ID)
+	l.registration(ramble, "Léa", "lea@example.com", "confirmed", &group.ID)
+	l.payment(&dbmodel.Guide{Model: gorm.Model{ID: *ramble.PaymentGuideID}}, 1250, nil, &group.ID)
+	h.MigrateAtStartup()
+	migrated := myReservations(t, h, "parent@example.com")[0]
+	token := h.Login("parent@example.com")
+	admin := h.Token(h.CreateUser("admin@example.com", "admin"))
+	paul, lea := migrated.Participants[0], migrated.Participants[1]
+
+	if response := updateParticipant(h, migrated.ID, paul.ID, participantUpdatePayload{FirstName: paul.FirstName, LastName: paul.LastName, PriceLabel: "Adulte"}, token); response.Code != http.StatusOK {
+		t.Fatalf("booker specifying a missing price: expected 200, got %d: %s", response.Code, response.Body)
+	}
+	if response := adminUpdateParticipant(h, migrated.ID, lea.ID, adminParticipantPayload{PriceLabel: stringPtr("Enfant")}, admin); response.Code != http.StatusOK {
+		t.Fatalf("admin specifying a missing price: expected 200, got %d: %s", response.Code, response.Body)
+	}
+	response := updateParticipant(h, migrated.ID, paul.ID, participantUpdatePayload{FirstName: paul.FirstName, LastName: paul.LastName, PriceLabel: "Enfant"}, token)
+	if reason := confirmationRefusal(t, response); reason != "reservation_paid" {
+		t.Errorf("changing a known price once paid: expected reason reservation_paid, got %q", reason)
+	}
+
+	var balance reservationWithPayment
+	confirmReservation(h, migrated.ID, token).JSON(t, &balance)
+	if balance.HasMissingPrices || balance.Payment == nil || balance.Payment.Payment.Amount != 600 {
+		t.Errorf("expected the balance of 6,00 € (18,50 € minus 12,50 € paid) payable, got %+v", balance.Payment)
 	}
 }

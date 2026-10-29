@@ -89,7 +89,7 @@ func (config *Config) RemoveParticipant(w http.ResponseWriter, r *http.Request) 
 }
 
 // @Summary Update a participant of a reservation
-// @Description Change the name or the price of a participant, as long as the reservation is not paid.
+// @Description Change the name or the price of a participant, as long as the reservation is not paid. Once paid, only a missing price (price_missing) can still be specified.
 // @Tags reservations
 // @Accept json
 // @Produce json

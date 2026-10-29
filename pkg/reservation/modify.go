@@ -106,7 +106,7 @@ type participantChange struct {
 }
 
 // updateParticipant changes the name and price of a participant, as long as
-// the reservation is not paid.
+// the reservation is not paid; once paid, only a missing price can be specified.
 func (config *Config) updateParticipant(reservation *dbmodel.Reservation, participantID uint, payload *model.ParticipantUpdatePayload) error {
 	return config.changeParticipant(reservation, participantID, participantChange{
 		firstName:  &payload.FirstName,
@@ -116,7 +116,9 @@ func (config *Config) updateParticipant(reservation *dbmodel.Reservation, partic
 }
 
 // changeParticipant applies the change to a participant. Once the reservation is
-// paid, nothing can change, or with nameOnly only the price is frozen.
+// paid, the known prices are frozen, and with nameOnly the name can still be
+// corrected, otherwise nothing else changes. Specifying a missing price stays
+// allowed, so that the balance of a migrated reservation can be paid.
 func (config *Config) changeParticipant(reservation *dbmodel.Reservation, participantID uint, change participantChange, nameOnly bool) error {
 	return config.ReservationRepository.ModifyForRamble(reservation.RambleID, func(locked *dbmodel.LockedRamble) error {
 		active := locked.Reservation(reservation.ID)
@@ -128,9 +130,6 @@ func (config *Config) changeParticipant(reservation *dbmodel.Reservation, partic
 			return errParticipantNotFound()
 		}
 		paid := active.HasSuccessfulPayment()
-		if paid && !nameOnly {
-			return errReservationPaid()
-		}
 
 		priceLabel := participant.PriceLabel
 		if change.priceLabel != nil {
@@ -138,9 +137,15 @@ func (config *Config) changeParticipant(reservation *dbmodel.Reservation, partic
 			if priceLabel, err = resolvePriceLabel(locked.Ramble, *change.priceLabel); err != nil {
 				return err
 			}
-			if paid && priceLabel != participant.PriceLabel {
+			if paid && priceLabel != participant.PriceLabel && !locked.Ramble.PriceMissing(participant.PriceLabel) {
 				return errReservationPaid()
 			}
+		}
+
+		renamed := (change.firstName != nil && *change.firstName != participant.FirstName) ||
+			(change.lastName != nil && *change.lastName != participant.LastName)
+		if paid && renamed && !nameOnly {
+			return errReservationPaid()
 		}
 
 		if change.firstName != nil {

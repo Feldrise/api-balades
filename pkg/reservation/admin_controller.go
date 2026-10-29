@@ -443,7 +443,7 @@ func (config *Config) bulkAction(user *dbmodel.User, id uint, data *model.BulkRe
 }
 
 // @Summary Update a participant of a reservation (admin)
-// @Description Change the name or the price of a participant, to correct an error. The omitted fields are kept. Once the reservation is paid, the price is frozen but the name can still be corrected.
+// @Description Change the name or the price of a participant, to correct an error. The omitted fields are kept. Once the reservation is paid, the known prices are frozen but the name can still be corrected and a missing price specified.
 // @Tags admin,reservations
 // @Accept json
 // @Produce json

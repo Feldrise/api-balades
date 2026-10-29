@@ -201,6 +201,7 @@ type paymentToMake struct {
 		Amount        int64  `json:"amount"`
 		Status        string `json:"status"`
 		ReservationID *uint  `json:"reservation_id"`
+		GuideID       uint   `json:"guide_id"`
 	} `json:"payment"`
 	ClientSecret   string `json:"client_secret"`
 	PublishableKey string `json:"publishable_key"`

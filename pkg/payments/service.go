@@ -23,13 +23,14 @@ type PaymentService interface {
 	// CreatePaymentForReservation creates the payment of the amount due by the
 	// reservation, as it is once locked: the payments of a reservation are
 	// decided one at a time. It fails with one of the errors above when the
-	// reservation, once locked, cannot be paid. It gives back the pending payment of the same
-	// amount, if any, rather than creating another one, and cancels the pending
-	// payments of other amounts.
+	// reservation, once locked, cannot be paid. It gives back the pending
+	// payment of the same amount to the same guide, if any, rather than
+	// creating another one, and cancels every other open payment.
 	CreatePaymentForReservation(reservation *dbmodel.Reservation, payerInfo PayerInfo) (*model.PaymentResponse, error)
-	// CancelObsoletePayments cancels, on Stripe too, the pending payments of the
-	// reservation, as it is once locked, that no longer match what it owes, so
-	// that they cannot be paid.
+	// CancelObsoletePayments reconciles the open payments of the reservation,
+	// as it is once locked: it cancels, on Stripe too, every open payment but
+	// the single one it may still pay (payable, of the amount due, to the guide
+	// of the ramble), so that the others cannot be paid.
 	CancelObsoletePayments(reservation *dbmodel.Reservation) error
 	ProcessPaymentSuccess(paymentIntentID string) error
 	ProcessPaymentFailure(paymentIntentID string, failureReason ...string) error
@@ -112,38 +113,32 @@ func (s *paymentService) createPayment(payments dbmodel.PaymentRepository, reser
 		return nil, err
 	}
 
-	for i := range reservation.Payments {
-		open := &reservation.Payments[i]
-		if !open.IsOpen() || open.Amount != amountCents || open.GuideID != guide.ID {
-			continue
-		}
+	if err := s.cancelObsoletePayments(payments, reservation, guide); err != nil {
+		return nil, err
+	}
 
-		paymentIntent, err := s.stripeService.RetrievePaymentIntent(credentials, open.StripePaymentIntentID)
+	if kept := keptPayment(reservation, guide); kept != nil {
+		paymentIntent, err := s.stripeService.RetrievePaymentIntent(credentials, kept.StripePaymentIntentID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to retrieve payment intent: %w", err)
 		}
 		switch paymentIntent.Status {
 		case stripego.PaymentIntentStatusCanceled:
 			// Cancelled on Stripe without the webhook being received.
-			open.Status = "cancelled"
-			if err := payments.UpdateStatus(open.ID, open.Status); err != nil {
+			kept.Status = "cancelled"
+			if err := payments.UpdateStatus(kept.ID, kept.Status); err != nil {
 				return nil, fmt.Errorf("failed to update payment: %w", err)
 			}
-			continue
 		case stripego.PaymentIntentStatusSucceeded, stripego.PaymentIntentStatusProcessing:
 			return nil, errors.New("the payment is being collected, awaiting its confirmation by Stripe")
+		default:
+			kept.Guide = *guide
+			return &model.PaymentResponse{
+				Payment:        kept.ToModel(),
+				ClientSecret:   paymentIntent.ClientSecret,
+				PublishableKey: *guide.StripePublicKey,
+			}, nil
 		}
-
-		open.Guide = *guide
-		return &model.PaymentResponse{
-			Payment:        open.ToModel(),
-			ClientSecret:   paymentIntent.ClientSecret,
-			PublishableKey: *guide.StripePublicKey,
-		}, nil
-	}
-
-	if err := s.cancelObsoletePayments(payments, reservation); err != nil {
-		return nil, err
 	}
 
 	reservationID := reservation.ID
@@ -200,19 +195,57 @@ func paymentIdempotencyKey(reservationID uint, paymentNumber int, amount int64, 
 
 func (s *paymentService) CancelObsoletePayments(reservation *dbmodel.Reservation) error {
 	return s.paymentRepo.ForReservation(reservation.ID, func(payments dbmodel.PaymentRepository, locked *dbmodel.Reservation) error {
-		return s.cancelObsoletePayments(payments, locked)
+		guide, err := s.payableTo(locked)
+		if err != nil {
+			return err
+		}
+		return s.cancelObsoletePayments(payments, locked, guide)
 	})
 }
 
-// cancelObsoletePayments cancels the open payments of the reservation, locked,
-// that no longer match what it owes.
-func (s *paymentService) cancelObsoletePayments(payments dbmodel.PaymentRepository, reservation *dbmodel.Reservation) error {
+// payableTo returns the guide the reservation, locked, pays what it owes to,
+// nil when it cannot be paid.
+func (s *paymentService) payableTo(reservation *dbmodel.Reservation) (*dbmodel.Guide, error) {
+	ramble := &reservation.Ramble
+	if s.checkPayable(reservation) != nil || !ramble.PaymentEnabled || ramble.PaymentGuideID == nil {
+		return nil, nil
+	}
+	guide, err := s.guideRepo.FindByID(*ramble.PaymentGuideID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find payment guide: %w", err)
+	}
+	if guide == nil || !guide.PaymentEnabled {
+		return nil, nil
+	}
+	return guide, nil
+}
+
+// keptPayment returns the single open payment the reservation, locked, may
+// still pay to guide: the first of the amount it owes to guide. It is nil when
+// guide is nil, the reservation being then not payable.
+func keptPayment(reservation *dbmodel.Reservation, guide *dbmodel.Guide) *dbmodel.Payment {
+	if guide == nil {
+		return nil
+	}
 	amountDue := reservation.AmountDue()
-	payable := s.checkPayable(reservation) == nil
+	for i := range reservation.Payments {
+		open := &reservation.Payments[i]
+		if open.IsOpen() && open.Amount == amountDue && open.GuideID == guide.ID {
+			return open
+		}
+	}
+	return nil
+}
+
+// cancelObsoletePayments cancels every open payment of the reservation, locked,
+// but the one it may still pay to guide (see keptPayment), so that a single
+// payment can be paid at a time.
+func (s *paymentService) cancelObsoletePayments(payments dbmodel.PaymentRepository, reservation *dbmodel.Reservation, guide *dbmodel.Guide) error {
+	kept := keptPayment(reservation, guide)
 
 	for i := range reservation.Payments {
 		open := &reservation.Payments[i]
-		if !open.IsOpen() || (payable && open.Amount == amountDue) {
+		if !open.IsOpen() || open == kept {
 			continue
 		}
 

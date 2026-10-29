@@ -651,3 +651,36 @@ func TestWebhookOnAPaymentUnknownIsRetriedOnlyWhenItIsAReservationPayment(t *tes
 		})
 	}
 }
+
+func TestPendingPaymentToAnotherGuideIsCancelledWhenTheBeneficiaryChanges(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	token := h.Login("alice@example.com")
+	openConfirmation(h, ramble)
+	confirmReservation(h, created.ID, token)
+	firstIntent := h.Stripe.PaymentIntents()[0].ID
+	// The beneficiary of the payment is changed to the guide of another ramble.
+	otherGuideID := *h.CreateRamble(payingFamilyRamble()).PaymentGuideID
+	h.DB.Model(&dbmodel.Ramble{}).Where("id = ?", ramble.ID).Update("payment_guide_id", otherGuideID)
+
+	var again reservationWithPayment
+	confirmReservation(h, created.ID, token).JSON(t, &again)
+
+	if again.Payment == nil || again.Payment.Payment.GuideID != otherGuideID || again.Payment.Payment.Amount != 2500 {
+		t.Fatalf("expected a payment of 25,00 € to the new guide, got %+v", again.Payment)
+	}
+	if cancelled := h.Stripe.CancelledPaymentIntents(); len(cancelled) != 1 || cancelled[0] != firstIntent {
+		t.Errorf("expected the payment to the former guide cancelled on Stripe, got %v", cancelled)
+	}
+	got := getReservation(t, h, created.ID, token)
+	open := 0
+	for _, p := range got.Payments {
+		if p.Status != "cancelled" {
+			open++
+		}
+	}
+	if open != 1 {
+		t.Errorf("expected a single payment left open, got %+v", got.Payments)
+	}
+}

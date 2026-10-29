@@ -176,6 +176,10 @@ func (s *paymentService) ProcessPaymentSuccess(paymentIntentID string) error {
 	if payment == nil {
 		return errors.New("payment not found")
 	}
+	// A late event never brings back a refunded payment.
+	if payment.IsCollected() {
+		return nil
+	}
 
 	// Update payment status
 	payment.Status = "succeeded"
@@ -197,6 +201,10 @@ func (s *paymentService) ProcessPaymentFailure(paymentIntentID string, failureRe
 	}
 	if payment == nil {
 		return errors.New("payment not found")
+	}
+	// A late event never downgrades a payment collected.
+	if payment.IsCollected() {
+		return nil
 	}
 
 	// Update payment status
@@ -362,6 +370,10 @@ func (s *paymentService) VerifyWebhookAndProcess(payload []byte, signature strin
 
 		if payment == nil {
 			log.Printf("No payment found for intent %s", eventData.PaymentIntentID)
+			return nil
+		}
+		// A late event never downgrades a payment collected.
+		if payment.IsCollected() {
 			return nil
 		}
 

@@ -204,3 +204,54 @@ func TestPartiallyRefundedPaymentCountsForItsNetAmount(t *testing.T) {
 		t.Errorf("expected the second refund to be of the 15,00 € left, got %+v", refunds)
 	}
 }
+
+type paymentView struct {
+	Status                string `json:"status"`
+	GuideID               uint   `json:"guide_id"`
+	StripePaymentIntentID string `json:"stripe_payment_intent_id"`
+}
+
+func getPayment(t *testing.T, h *testharness.Harness, id uint, token string) paymentView {
+	t.Helper()
+
+	response := h.Do(http.MethodGet, fmt.Sprintf("/payments/%d", id), nil, token)
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /payments/%d: expected 200, got %d: %s", id, response.Code, response.Body)
+	}
+	var got paymentView
+	response.JSON(t, &got)
+	return got
+}
+
+func TestLateWebhooksNeverDowngradeASucceededOrRefundedPayment(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	token := h.Login("alice@example.com")
+	openConfirmation(h, ramble)
+	var confirmed reservationWithPayment
+	confirmReservation(h, created.ID, token).JSON(t, &confirmed)
+	id := confirmed.Payment.Payment.ID
+	p := getPayment(t, h, id, token)
+
+	if response := h.SendStripeWebhook(p.GuideID, "payment_intent.succeeded", p.StripePaymentIntentID); response.Code != http.StatusOK {
+		t.Fatalf("succeeded webhook: expected 200, got %d: %s", response.Code, response.Body)
+	}
+	for _, late := range []string{"payment_intent.payment_failed", "payment_intent.requires_action", "payment_intent.canceled"} {
+		h.SendStripeWebhook(p.GuideID, late, p.StripePaymentIntentID)
+	}
+	if got := getPayment(t, h, id, token); got.Status != "succeeded" {
+		t.Fatalf("expected the payment to stay succeeded after late webhooks, got %q", got.Status)
+	}
+
+	admin := h.Token(h.CreateUser("admin@example.com", "admin"))
+	if response := refundPayment(h, id, nil, admin); response.Code != http.StatusOK {
+		t.Fatalf("refunding: expected 200, got %d: %s", response.Code, response.Body)
+	}
+	for _, late := range []string{"payment_intent.succeeded", "payment_intent.payment_failed", "payment_intent.requires_action"} {
+		h.SendStripeWebhook(p.GuideID, late, p.StripePaymentIntentID)
+	}
+	if got := getPayment(t, h, id, token); got.Status != "refunded" {
+		t.Errorf("expected the payment to stay refunded after late webhooks, got %q", got.Status)
+	}
+}

@@ -1,7 +1,11 @@
 package testharness
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"time"
 
 	"feldrise.com/balade/database"
@@ -113,6 +117,9 @@ func (h *Harness) CreateRamble(options RambleOptions) *dbmodel.Ramble {
 // PaymentGuidePublicKey is the Stripe public key of the paying guides of rambles with online payment.
 const PaymentGuidePublicKey = "pk_test_guide"
 
+// PaymentGuideWebhookSecret is the Stripe webhook secret of the paying guides.
+const PaymentGuideWebhookSecret = "whsec_test_guide"
+
 func (h *Harness) createPayingGuide() *dbmodel.Guide {
 	h.t.Helper()
 
@@ -121,17 +128,22 @@ func (h *Harness) createPayingGuide() *dbmodel.Guide {
 	if err != nil {
 		h.t.Fatalf("encrypting Stripe secret key: %v", err)
 	}
+	webhookSecret, err := encryption.Encrypt(PaymentGuideWebhookSecret)
+	if err != nil {
+		h.t.Fatalf("encrypting Stripe webhook secret: %v", err)
+	}
 	publicKey := PaymentGuidePublicKey
 
 	var count int64
 	h.DB.Model(&dbmodel.Guide{}).Count(&count)
 	guide := &dbmodel.Guide{
-		FirstName:       "Guide",
-		LastName:        "Payant",
-		Email:           fmt.Sprintf("paying-guide-%d@example.com", count+1),
-		StripePublicKey: &publicKey,
-		StripeSecretKey: &secretKey,
-		PaymentEnabled:  true,
+		FirstName:           "Guide",
+		LastName:            "Payant",
+		Email:               fmt.Sprintf("paying-guide-%d@example.com", count+1),
+		StripePublicKey:     &publicKey,
+		StripeSecretKey:     &secretKey,
+		StripeWebhookSecret: &webhookSecret,
+		PaymentEnabled:      true,
 	}
 	if err := h.DB.Create(guide).Error; err != nil {
 		h.t.Fatalf("creating paying guide: %v", err)
@@ -271,4 +283,31 @@ func (h *Harness) CreateUserWithPermissions(address string, permissions ...strin
 	}
 
 	return user
+}
+
+// SendStripeWebhook sends the paying guide's webhook a Stripe event of the
+// given type (payment_intent.succeeded, payment_intent.payment_failed...) on
+// the payment intent, signed as Stripe would.
+func (h *Harness) SendStripeWebhook(guideID uint, eventType string, paymentIntentID string) *Response {
+	h.t.Helper()
+
+	event := map[string]any{
+		"id":     fmt.Sprintf("evt_%s_%s", eventType, paymentIntentID),
+		"object": "event",
+		"type":   eventType,
+		"data": map[string]any{
+			"object": map[string]any{"id": paymentIntentID, "object": "payment_intent"},
+		},
+	}
+	encoded, err := json.Marshal(event)
+	if err != nil {
+		h.t.Fatalf("encoding webhook event: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/payments/webhook?guide_id=%d", guideID), bytes.NewReader(encoded))
+	request.Header.Set("Stripe-Signature", FakeWebhookSignature(PaymentGuideWebhookSecret))
+	recorder := httptest.NewRecorder()
+	h.Router.ServeHTTP(recorder, request)
+
+	return &Response{Code: recorder.Code, Body: recorder.Body.Bytes()}
 }

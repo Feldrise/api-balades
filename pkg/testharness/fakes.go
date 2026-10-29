@@ -1,6 +1,7 @@
 package testharness
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -161,12 +162,28 @@ func (s *FakeStripeService) RefundPayment(credentials stripe.GuideStripeCredenti
 	return &stripego.Refund{ID: fmt.Sprintf("re_test_%d", len(s.refunds))}, nil
 }
 
-func (s *FakeStripeService) VerifyWebhookSignature(payload []byte, signature string, secret string) (*stripego.Event, error) {
-	return nil, errors.New("webhooks are not supported by the fake Stripe service")
+// FakeWebhookSignature is the signature the fake Stripe service accepts for
+// webhooks signed with secret.
+func FakeWebhookSignature(secret string) string {
+	return "fake_signature_" + secret
 }
 
+// VerifyWebhookSignature accepts the payload of an event signed with FakeWebhookSignature.
+func (s *FakeStripeService) VerifyWebhookSignature(payload []byte, signature string, secret string) (*stripego.Event, error) {
+	if signature != FakeWebhookSignature(secret) {
+		return nil, errors.New("invalid webhook signature")
+	}
+
+	var event stripego.Event
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return nil, fmt.Errorf("invalid webhook payload: %w", err)
+	}
+	return &event, nil
+}
+
+// ProcessWebhookEvent reads the event as the real Stripe service does.
 func (s *FakeStripeService) ProcessWebhookEvent(event *stripego.Event) (*stripe.WebhookEventData, error) {
-	return nil, errors.New("webhooks are not supported by the fake Stripe service")
+	return stripe.NewStripeService().ProcessWebhookEvent(event)
 }
 
 // PaymentIntents returns the payment intents created so far.

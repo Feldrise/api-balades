@@ -222,14 +222,13 @@ func (h *Harness) PayReservation(reservationID uint, amount int64) *dbmodel.Paym
 		h.t.Fatalf("finding reservation %d: %v", reservationID, err)
 	}
 
-	guide := &dbmodel.Guide{FirstName: "Guide", LastName: "Payé", Email: fmt.Sprintf("guide-%d@example.com", reservationID)}
-	if err := h.DB.Create(guide).Error; err != nil {
-		h.t.Fatalf("creating guide: %v", err)
-	}
+	guide := h.createPayingGuide()
 
+	var count int64
+	h.DB.Model(&dbmodel.Payment{}).Count(&count)
 	paidAt := h.Clock.Now()
 	payment := &dbmodel.Payment{
-		StripePaymentIntentID: fmt.Sprintf("pi_paid_%d", reservationID),
+		StripePaymentIntentID: fmt.Sprintf("pi_paid_%d", count+1),
 		Amount:                amount,
 		Status:                "succeeded",
 		ReservationID:         &reservationID,
@@ -243,4 +242,33 @@ func (h *Harness) PayReservation(reservationID uint, amount int64) *dbmodel.Paym
 	}
 
 	return payment
+}
+
+// CreateUserWithPermissions inserts a user whose single role grants exactly the
+// given permissions, to test what each permission allows on its own.
+func (h *Harness) CreateUserWithPermissions(address string, permissions ...string) *dbmodel.User {
+	h.t.Helper()
+
+	role := dbmodel.Role{Name: "only-" + address}
+	for _, name := range permissions {
+		var permission dbmodel.Permission
+		if err := h.DB.Where("name = ?", name).First(&permission).Error; err != nil {
+			h.t.Fatalf("finding permission %q: %v", name, err)
+		}
+		role.Permissions = append(role.Permissions, permission)
+	}
+	if err := h.DB.Create(&role).Error; err != nil {
+		h.t.Fatalf("creating role for %q: %v", address, err)
+	}
+
+	user := &dbmodel.User{
+		Email:       address,
+		UserProfile: dbmodel.UserProfile{FirstName: "Test"},
+		Roles:       []dbmodel.Role{role},
+	}
+	if err := h.DB.Create(user).Error; err != nil {
+		h.t.Fatalf("creating user %q: %v", address, err)
+	}
+
+	return user
 }

@@ -40,7 +40,7 @@ func New(configuration *config.Config) *chi.Mux {
 		r.Mount("/guides", guide.New(configuration).Routes())
 		r.Mount("/rambles", ramble.New(configuration).Routes())
 		r.Mount("/reservations", reservation.New(configuration).Routes())
-		r.Mount("/payments", payment.Routes(configuration.PaymentService))
+		r.Mount("/payments", payment.Routes(configuration))
 	})
 
 	fs := http.FileServer(http.Dir(configuration.Constants.DataPath + "/uploads"))

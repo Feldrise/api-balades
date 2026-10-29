@@ -1,0 +1,33 @@
+meta {
+  name: Add Participants
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{base_url}}/reservations/{{reservation_id}}/participants
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+body:json {
+  {
+    "participants": [
+      { "first_name": "Zoé", "last_name": "Martin", "price_label": "Enfant" }
+    ]
+  }
+}
+
+docs {
+  Adds participants, all or none: refused with 409 not_enough_places when they do not fit in the places left. Restricted to the booker, or an admin or guide allowed on the ramble.
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

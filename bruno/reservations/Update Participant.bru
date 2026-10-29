@@ -1,0 +1,33 @@
+meta {
+  name: Update Participant
+  type: http
+  seq: 5
+}
+
+put {
+  url: {{base_url}}/reservations/{{reservation_id}}/participants/{{participant_id}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+body:json {
+  {
+    "first_name": "Zoé",
+    "last_name": "Martin",
+    "price_label": "Adulte"
+  }
+}
+
+docs {
+  Changes the name or price of a participant, refused with 409 reservation_paid once a payment succeeded.
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

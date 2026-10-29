@@ -1,0 +1,25 @@
+meta {
+  name: Remove Participant
+  type: http
+  seq: 6
+}
+
+delete {
+  url: {{base_url}}/reservations/{{reservation_id}}/participants/{{participant_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+docs {
+  Removes a participant. Removing the last one cancels the reservation. has_successful_payment tells to contact the guide for a refund.
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

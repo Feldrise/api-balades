@@ -233,3 +233,27 @@ func TestFreeRambleReservationHasNoAmount(t *testing.T) {
 		t.Errorf("expected 3 participants without price, got %+v", created)
 	}
 }
+
+func TestSecondReservationWithSameEmailIsRefusedWithDedicatedError(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(familyRamble())
+	other := h.CreateRamble(familyRamble())
+	first := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(1, "Adulte")})
+
+	response := h.Do(http.MethodPost, "/reservations", reservationPayload{
+		RambleID:     ramble.ID,
+		ContactEmail: "  Alice@Example.com ",
+		Participants: people(1, "Enfant"),
+	}, "")
+
+	if response.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", response.Code, response.Body)
+	}
+	var body errorBody
+	response.JSON(t, &body)
+	if body.Reason != "reservation_already_exists" || body.ReservationID != first.ID {
+		t.Errorf("expected reason reservation_already_exists for reservation %d, got %s", first.ID, response.Body)
+	}
+
+	reserve(t, h, reservationPayload{RambleID: other.ID, ContactEmail: "alice@example.com", Participants: people(1, "Adulte")})
+}

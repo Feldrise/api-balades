@@ -2,6 +2,7 @@ package reservation
 
 import (
 	"fmt"
+	"strings"
 
 	"feldrise.com/balade/database/dbmodel"
 	"feldrise.com/balade/pkg/model"
@@ -29,6 +30,12 @@ func (config *Config) createReservation(data *model.ReservationCreatePayload, ra
 	}
 
 	return config.ReservationRepository.CreateForRamble(ramble.ID, func(active []dbmodel.Reservation) (*dbmodel.Reservation, error) {
+		for _, existing := range active {
+			if strings.EqualFold(existing.ContactEmail, data.ContactEmail) {
+				return nil, errReservationAlreadyExists(existing.ID)
+			}
+		}
+
 		return &dbmodel.Reservation{
 			RambleID:     ramble.ID,
 			UserID:       user.ID,

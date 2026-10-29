@@ -13,6 +13,13 @@ type businessError struct {
 	status  int
 	reason  string
 	message string
+	// reservationID is the existing reservation a duplicate attempt refers to.
+	reservationID uint
+}
+
+type businessErrorResponse struct {
+	*apierrors.ErrResponse
+	ReservationID uint `json:"reservation_id,omitempty"`
 }
 
 func (e *businessError) Error() string {
@@ -23,10 +30,22 @@ func errInvalidPrice(message string) error {
 	return &businessError{status: http.StatusBadRequest, reason: "invalid_price", message: message}
 }
 
+func errReservationAlreadyExists(reservationID uint) error {
+	return &businessError{
+		status:        http.StatusConflict,
+		reason:        "reservation_already_exists",
+		message:       "a reservation already exists for this ramble and email",
+		reservationID: reservationID,
+	}
+}
+
 func renderError(err error) render.Renderer {
 	var business *businessError
 	if errors.As(err, &business) {
-		return apierrors.ErrBusiness(business.status, business.reason, business.message)
+		return &businessErrorResponse{
+			ErrResponse:   apierrors.ErrBusiness(business.status, business.reason, business.message),
+			ReservationID: business.reservationID,
+		}
 	}
 
 	return apierrors.ErrServerError(err)

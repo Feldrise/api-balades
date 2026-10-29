@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"feldrise.com/balade/database/dbmodel"
+	"feldrise.com/balade/pkg/clock"
 	"feldrise.com/balade/pkg/notifications/email"
 )
 
@@ -17,6 +18,7 @@ type RegistrationScheduler struct {
 	registrationRepo dbmodel.RambleRegistrationRepository
 	groupRepo        dbmodel.RambleRegistrationGroupRepository
 	emailService     email.EmailService
+	clock            clock.Clock
 	applicationURL   string
 }
 
@@ -25,6 +27,7 @@ func NewRegistrationScheduler(
 	registrationRepo dbmodel.RambleRegistrationRepository,
 	groupRepo dbmodel.RambleRegistrationGroupRepository,
 	emailService email.EmailService,
+	clock clock.Clock,
 	applicationURL string,
 ) *RegistrationScheduler {
 	return &RegistrationScheduler{
@@ -32,6 +35,7 @@ func NewRegistrationScheduler(
 		registrationRepo: registrationRepo,
 		groupRepo:        groupRepo,
 		emailService:     emailService,
+		clock:            clock,
 		applicationURL:   applicationURL,
 	}
 }
@@ -58,7 +62,7 @@ func (s *RegistrationScheduler) StartScheduler() {
 
 // processConfirmationRequests sends confirmation requests 3 days before the ramble
 func (s *RegistrationScheduler) processConfirmationRequests() {
-	threeDaysFromNow := time.Now().AddDate(0, 0, 3)
+	threeDaysFromNow := s.clock.Now().AddDate(0, 0, 3)
 
 	registrations, err := s.registrationRepo.GetRegistrationsRequiringConfirmation(threeDaysFromNow)
 	if err != nil {
@@ -74,7 +78,7 @@ func (s *RegistrationScheduler) processConfirmationRequests() {
 // processUnconfirmedRegistrations releases spots for unconfirmed registrations once their
 // confirmation deadline has passed, or when the ramble is within the cancellation window.
 func (s *RegistrationScheduler) processUnconfirmedRegistrations() {
-	now := time.Now()
+	now := s.clock.Now()
 	registrations, err := s.registrationRepo.GetUnconfirmedRegistrations(now, now.Add(confirmationDeadlineBeforeRamble))
 	if err != nil {
 		log.Printf("Error getting unconfirmed registrations: %v", err)
@@ -136,7 +140,7 @@ func (s *RegistrationScheduler) sendConfirmationRequest(registration *dbmodel.Ra
 
 func (s *RegistrationScheduler) cancelUnconfirmedRegistration(registration *dbmodel.RambleRegistration) {
 	// Cancel the registration
-	now := time.Now()
+	now := s.clock.Now()
 	registration.Status = "cancelled"
 	registration.CancellationDate = &now
 	registration.CancellationReason = func() *string { s := "No confirmation before deadline"; return &s }()

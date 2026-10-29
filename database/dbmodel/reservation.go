@@ -60,6 +60,21 @@ type Participant struct {
 	IsBooker bool `gorm:"not null;default:false"`
 }
 
+// BookerName is the name of the booker, from their participant line or else
+// their account. It requires the Participants and the User profile to be loaded.
+func (r *Reservation) BookerName() (firstName string, lastName string) {
+	for _, participant := range r.Participants {
+		if participant.IsBooker {
+			return participant.FirstName, participant.LastName
+		}
+	}
+
+	if r.User.UserProfile.LastName != nil {
+		lastName = *r.User.UserProfile.LastName
+	}
+	return r.User.UserProfile.FirstName, lastName
+}
+
 // TakesPlaces reports whether the reservation's participants occupy places on the ramble.
 func (r *Reservation) TakesPlaces() bool {
 	return r.Status == ReservationStatusPending || r.Status == ReservationStatusConfirmed

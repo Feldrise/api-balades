@@ -243,7 +243,7 @@ func (config *Config) respondWithPayment(w http.ResponseWriter, r *http.Request,
 	var payment *model.PaymentResponse
 	if reservation.Status == dbmodel.ReservationStatusConfirmed && reservation.Ramble.PaymentEnabled &&
 		!reservation.HasMissingPrices() && reservation.AmountDue() > 0 {
-		firstName, lastName := bookerName(reservation)
+		firstName, lastName := reservation.BookerName()
 		payment, err = config.PaymentService.CreatePaymentForReservation(reservation, payments.PayerInfo{
 			Email: reservation.ContactEmail,
 			Name:  strings.TrimSpace(firstName + " " + lastName),

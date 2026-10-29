@@ -77,7 +77,7 @@ func (config *Config) CancelUnconfirmedReservations(now time.Time) error {
 }
 
 func (config *Config) sendConfirmationRequest(reservation *dbmodel.Reservation, deadline time.Time) {
-	firstName, lastName := bookerName(reservation)
+	firstName, lastName := reservation.BookerName()
 	data := email.EventConfirmationRequestData{
 		FirstName:            firstName,
 		LastName:             lastName,
@@ -97,19 +97,4 @@ func (config *Config) sendConfirmationRequest(reservation *dbmodel.Reservation, 
 	if err != nil {
 		log.Printf("Failed to send confirmation request for reservation %d: %v", reservation.ID, err)
 	}
-}
-
-// bookerName is the name of the booker, from their participant line or else their account.
-func bookerName(reservation *dbmodel.Reservation) (string, string) {
-	for _, participant := range reservation.Participants {
-		if participant.IsBooker {
-			return participant.FirstName, participant.LastName
-		}
-	}
-
-	lastName := ""
-	if reservation.User.UserProfile.LastName != nil {
-		lastName = *reservation.User.UserProfile.LastName
-	}
-	return reservation.User.UserProfile.FirstName, lastName
 }

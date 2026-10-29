@@ -642,38 +642,34 @@ func (config *Config) Cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Send cancellation emails to all registered participants
+	// Tell the bookers of the active reservations
 	go config.sendCancellationEmails(dbRamble)
 
 	render.JSON(w, r, dbRamble.ToModel())
 }
 
-// sendCancellationEmails sends cancellation notifications to all registered participants
+// sendCancellationEmails tells the booker of each reservation of the ramble that is not cancelled
 func (config *Config) sendCancellationEmails(ramble *dbmodel.Ramble) {
-	// Get all active registrations for this ramble
-	filter := &dbmodel.RambleRegistrationFilter{
+	reservations, err := config.ReservationRepository.FindAll(&dbmodel.ReservationFilter{
 		RambleID: &ramble.ID,
-	}
-
-	registrations, err := config.RambleRegistrationRepository.FindAll(filter)
+		Statuses: []string{dbmodel.ReservationStatusPending, dbmodel.ReservationStatusConfirmed, dbmodel.ReservationStatusWaitingList},
+	})
 	if err != nil {
-		fmt.Printf("Failed to get registrations for cancellation emails: %v\n", err)
+		fmt.Printf("Failed to get reservations for cancellation emails: %v\n", err)
 		return
 	}
 
-	// Send email to each registered participant (excluding already cancelled ones)
-	for _, registration := range registrations {
-		if registration.Status != "cancelled" {
-			config.sendCancellationEmail(&registration, ramble)
-		}
+	for i := range reservations {
+		config.sendCancellationEmail(&reservations[i], ramble)
 	}
 }
 
-// sendCancellationEmail sends a cancellation email to a single participant
-func (config *Config) sendCancellationEmail(registration *dbmodel.RambleRegistration, ramble *dbmodel.Ramble) {
+// sendCancellationEmail sends a cancellation email to the booker of a reservation
+func (config *Config) sendCancellationEmail(reservation *dbmodel.Reservation, ramble *dbmodel.Ramble) {
+	firstName, lastName := reservation.BookerName()
 	data := email.RambleCancellationData{
-		FirstName:          registration.FirstName,
-		LastName:           registration.LastName,
+		FirstName:          firstName,
+		LastName:           lastName,
 		Title:              ramble.Title,
 		Date:               formatDate(ramble.Date),
 		Location:           formatLocation(ramble.Location),
@@ -681,16 +677,16 @@ func (config *Config) sendCancellationEmail(registration *dbmodel.RambleRegistra
 	}
 
 	err := config.EmailService.Send(
-		registration.Email,
+		reservation.ContactEmail,
 		"Annulation de balade - Balade Écologique",
 		"ramble_cancellation",
 		data,
 	)
 
 	if err != nil {
-		fmt.Printf("Failed to send cancellation email to %s: %v\n", registration.Email, err)
+		fmt.Printf("Failed to send cancellation email to %s: %v\n", reservation.ContactEmail, err)
 	} else {
-		fmt.Printf("Sent cancellation email to %s for ramble: %s\n", registration.Email, ramble.Title)
+		fmt.Printf("Sent cancellation email to %s for ramble: %s\n", reservation.ContactEmail, ramble.Title)
 	}
 }
 

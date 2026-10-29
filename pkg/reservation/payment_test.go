@@ -506,3 +506,19 @@ func TestPaymentToMakeNamesItsGuide(t *testing.T) {
 		}
 	}
 }
+
+func TestRefundedPaymentWithoutTheAmountRefundedCountsAsEntirelyRefunded(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	h.Clock.Set(ramble.Date.Add(-2 * 24 * time.Hour))
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	paid := h.PayReservation(created.ID, 2500)
+	// As a legacy refund recorded without the amount refunded.
+	h.DB.Model(&dbmodel.Payment{}).Where("id = ?", paid.ID).Update("status", "refunded")
+
+	var got refundedReservation
+	h.Do(http.MethodGet, fmt.Sprintf("/reservations/%d", created.ID), nil, h.Login("alice@example.com")).JSON(t, &got)
+	if got.HasSuccessfulPayment || got.AmountPaid != 0 || got.AmountDue != 2500 {
+		t.Errorf("expected nothing kept and 25,00 € due, got paid %d, due %d, successful %v", got.AmountPaid, got.AmountDue, got.HasSuccessfulPayment)
+	}
+}

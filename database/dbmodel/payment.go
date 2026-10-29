@@ -61,9 +61,13 @@ func (p *Payment) IsCollected() bool {
 	return slices.Contains(CollectedPaymentStatuses, p.Status)
 }
 
-// RefundedAmount returns the amount in cents refunded so far.
+// RefundedAmount returns the amount in cents refunded so far. A payment
+// refunded without the amount refunded recorded is refunded entirely.
 func (p *Payment) RefundedAmount() int64 {
 	if p.RefundAmount == nil {
+		if p.Status == "refunded" {
+			return p.Amount
+		}
 		return 0
 	}
 	return *p.RefundAmount

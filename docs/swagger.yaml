@@ -251,6 +251,22 @@ definitions:
       price_label:
         type: string
     type: object
+  ParticipantUpdatePayload:
+    properties:
+      first_name:
+        type: string
+      last_name:
+        type: string
+      price_label:
+        type: string
+    type: object
+  ParticipantsAddPayload:
+    properties:
+      participants:
+        items:
+          $ref: '#/definitions/ParticipantPayload'
+        type: array
+    type: object
   Payment:
     properties:
       amount:
@@ -635,6 +651,11 @@ definitions:
         description: |-
           HasMissingPrices tells that a participant's price is unknown, so that
           EstimatedAmount is incomplete.
+        type: boolean
+      has_successful_payment:
+        description: |-
+          HasSuccessfulPayment tells that a payment succeeded: after a removal or a
+          cancellation, the booker is invited to contact the guide for a refund.
         type: boolean
       id:
         type: integer
@@ -2290,6 +2311,186 @@ paths:
           schema:
             $ref: '#/definitions/ErrResponse'
       summary: Get a reservation
+      tags:
+      - reservations
+  /reservations/{id}/cancel:
+    put:
+      description: 'Cancel the whole reservation. The places released go to the waiting
+        list. No automatic refund: has_successful_payment tells that the booker should
+        contact the guide.'
+      parameters:
+      - description: Reservation ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Reservation'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "409":
+          description: reservation_cancelled
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Cancel a reservation
+      tags:
+      - reservations
+  /reservations/{id}/participants:
+    post:
+      consumes:
+      - application/json
+      description: Add participants to a pending reservation if they all fit in the
+        places left, or to a reservation in waiting list. The booker receives a summary
+        email.
+      parameters:
+      - description: Reservation ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Participants to add
+        in: body
+        name: participants
+        required: true
+        schema:
+          $ref: '#/definitions/ParticipantsAddPayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Reservation'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "409":
+          description: not_enough_places, reservation_cancelled or reservation_confirmed
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Add participants to a reservation
+      tags:
+      - reservations
+  /reservations/{id}/participants/{participantId}:
+    delete:
+      description: Remove a participant. Removing the last one cancels the reservation.
+        The places released go to the waiting list. has_successful_payment tells that
+        the booker should contact the guide for a refund.
+      parameters:
+      - description: Reservation ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Participant ID
+        in: path
+        name: participantId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Reservation'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "409":
+          description: reservation_cancelled
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Remove a participant from a reservation
+      tags:
+      - reservations
+    put:
+      consumes:
+      - application/json
+      description: Change the name or the price of a participant, as long as the reservation
+        is not paid.
+      parameters:
+      - description: Reservation ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Participant ID
+        in: path
+        name: participantId
+        required: true
+        type: integer
+      - description: Participant data
+        in: body
+        name: participant
+        required: true
+        schema:
+          $ref: '#/definitions/ParticipantUpdatePayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Reservation'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "409":
+          description: reservation_paid or reservation_cancelled
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Update a participant of a reservation
       tags:
       - reservations
 swagger: "2.0"

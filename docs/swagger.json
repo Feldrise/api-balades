@@ -2313,6 +2313,266 @@
                     }
                 }
             }
+        },
+        "/reservations/{id}/cancel": {
+            "put": {
+                "description": "Cancel the whole reservation. The places released go to the waiting list. No automatic refund: has_successful_payment tells that the booker should contact the guide.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reservations"
+                ],
+                "summary": "Cancel a reservation",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Reservation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Reservation"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "reservation_cancelled",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/reservations/{id}/participants": {
+            "post": {
+                "description": "Add participants to a pending reservation if they all fit in the places left, or to a reservation in waiting list. The booker receives a summary email.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reservations"
+                ],
+                "summary": "Add participants to a reservation",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Reservation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Participants to add",
+                        "name": "participants",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ParticipantsAddPayload"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Reservation"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "not_enough_places, reservation_cancelled or reservation_confirmed",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/reservations/{id}/participants/{participantId}": {
+            "put": {
+                "description": "Change the name or the price of a participant, as long as the reservation is not paid.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reservations"
+                ],
+                "summary": "Update a participant of a reservation",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Reservation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Participant ID",
+                        "name": "participantId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Participant data",
+                        "name": "participant",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ParticipantUpdatePayload"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Reservation"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "reservation_paid or reservation_cancelled",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Remove a participant. Removing the last one cancels the reservation. The places released go to the waiting list. has_successful_payment tells that the booker should contact the guide for a refund.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reservations"
+                ],
+                "summary": "Remove a participant from a reservation",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Reservation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Participant ID",
+                        "name": "participantId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Reservation"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "reservation_cancelled",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -2682,6 +2942,31 @@
                 },
                 "price_label": {
                     "type": "string"
+                }
+            }
+        },
+        "ParticipantUpdatePayload": {
+            "type": "object",
+            "properties": {
+                "first_name": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "price_label": {
+                    "type": "string"
+                }
+            }
+        },
+        "ParticipantsAddPayload": {
+            "type": "object",
+            "properties": {
+                "participants": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ParticipantPayload"
+                    }
                 }
             }
         },
@@ -3246,6 +3531,10 @@
                 },
                 "has_missing_prices": {
                     "description": "HasMissingPrices tells that a participant's price is unknown, so that\nEstimatedAmount is incomplete.",
+                    "type": "boolean"
+                },
+                "has_successful_payment": {
+                    "description": "HasSuccessfulPayment tells that a payment succeeded: after a removal or a\ncancellation, the booker is invited to contact the guide for a refund.",
                     "type": "boolean"
                 },
                 "id": {

@@ -31,6 +31,10 @@ func Migrate(database *gorm.DB) {
 	log.Println("Database migrated")
 
 	ApplySeeds(database)
+
+	if err := MigrateLegacyRegistrations(database); err != nil {
+		log.Fatalf("Error migrating legacy registrations to reservations: %s", err)
+	}
 }
 
 func ApplySeeds(database *gorm.DB) {

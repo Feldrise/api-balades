@@ -3,6 +3,7 @@ package testharness
 import (
 	"time"
 
+	"feldrise.com/balade/database"
 	"feldrise.com/balade/database/dbmodel"
 	"feldrise.com/balade/pkg/authentication"
 	"feldrise.com/balade/pkg/notifications/email"
@@ -164,4 +165,11 @@ func (h *Harness) CreateGuide(user *dbmodel.User, rambles ...*dbmodel.Ramble) *d
 	}
 
 	return guide
+}
+
+// MigrateAtStartup runs the database migration the API runs when it starts.
+func (h *Harness) MigrateAtStartup() {
+	h.t.Helper()
+
+	database.Migrate(h.DB)
 }

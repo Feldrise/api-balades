@@ -193,14 +193,7 @@ func (config *Config) respondModified(w http.ResponseWriter, r *http.Request, id
 	if change != changeNone {
 		config.sendReservationEmail(reservation, change)
 	}
-	for _, promotedID := range promoted {
-		promotedReservation, err := config.ReservationRepository.FindByID(promotedID)
-		if err != nil || promotedReservation == nil {
-			log.Printf("Failed to load promoted reservation %d: %v", promotedID, err)
-			continue
-		}
-		config.sendReservationEmail(promotedReservation, changePromoted)
-	}
+	config.notifyPromoted(promoted)
 
 	render.JSON(w, r, reservation.ToModel())
 }
@@ -212,4 +205,16 @@ func parseID(w http.ResponseWriter, r *http.Request, param string) (uint, bool) 
 		return 0, false
 	}
 	return uint(id), true
+}
+
+// notifyPromoted tells the bookers of the promoted reservations they left the waiting list.
+func (config *Config) notifyPromoted(promoted []uint) {
+	for _, promotedID := range promoted {
+		promotedReservation, err := config.ReservationRepository.FindByID(promotedID)
+		if err != nil || promotedReservation == nil {
+			log.Printf("Failed to load promoted reservation %d: %v", promotedID, err)
+			continue
+		}
+		config.sendReservationEmail(promotedReservation, changePromoted)
+	}
 }

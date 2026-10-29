@@ -6,6 +6,7 @@ import (
 
 	"feldrise.com/balade/config"
 	_ "feldrise.com/balade/docs"
+	"feldrise.com/balade/pkg/reservation"
 	"feldrise.com/balade/pkg/router"
 	"feldrise.com/balade/pkg/scheduler"
 	"github.com/go-chi/chi"
@@ -25,16 +26,9 @@ func main() {
 		log.Panicln("Error initializing configuration:", err)
 	}
 
-	// Start the registration scheduler
-	registrationScheduler := scheduler.NewRegistrationScheduler(
-		configuration.RambleRepository,
-		configuration.RambleRegistrationRepository,
-		configuration.RambleRegistrationGroupRepository,
-		configuration.EmailService,
-		configuration.Clock,
-		configuration.ApplicationURL,
-	)
-	registrationScheduler.StartScheduler()
+	// Start the reservation scheduler
+	reservationScheduler := scheduler.NewReservationScheduler(reservation.New(configuration), configuration.Clock)
+	reservationScheduler.StartScheduler()
 
 	// We initialize the routes
 	apiRouter := router.New(configuration)

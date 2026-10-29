@@ -1,0 +1,21 @@
+meta {
+  name: List My Reservations
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/reservations
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

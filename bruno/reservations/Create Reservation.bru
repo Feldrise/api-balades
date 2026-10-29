@@ -1,0 +1,40 @@
+meta {
+  name: Create Reservation
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/reservations
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "ramble_id": {{ramble_id}},
+    "contact_email": "{{email}}",
+    "participants": [
+      { "first_name": "Alice", "last_name": "Martin", "price_label": "Adulte", "is_booker": true },
+      { "first_name": "Chloé", "last_name": "Martin", "price_label": "Enfant" }
+    ]
+  }
+}
+
+script:post-response {
+  if (res.getStatus() === 201) {
+    bru.setEnvVar("reservation_id", res.getBody().id);
+  }
+}
+
+docs {
+  Public. The booker's account is found or created from `contact_email`.
+  The whole reservation is `waiting_list` when its participants do not all fit in the places left.
+  A second reservation for the same ramble and email returns 409 with `reason: reservation_already_exists` and `reservation_id`.
+}
+
+tests {
+  test("Status code is 201", function() {
+    expect(res.getStatus()).to.equal(201);
+  });
+}

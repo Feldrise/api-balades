@@ -884,3 +884,63 @@ func TestReconciliationGivesUpOnASlowStripeWithoutHoldingTheReservation(t *testi
 		t.Errorf("expected the payment cancelled on Stripe recorded cancelled at the next pass, got %+v", got.Payments)
 	}
 }
+
+func TestRefundMadeFromTheStripeDashboardIsDueAgainWhenParticipantsAreAdded(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	h.Clock.Set(ramble.Date.Add(-2 * 24 * time.Hour))
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	paid := h.PayReservation(created.ID, 2500)
+	token := h.Login("alice@example.com")
+	reservationMetadata := map[string]string{"reservation_id": fmt.Sprint(created.ID)}
+
+	if response := removeParticipant(h, created.ID, created.Participants[1].ID, token); response.Code != http.StatusOK {
+		t.Fatalf("removing a participant: expected 200, got %d: %s", response.Code, response.Body)
+	}
+	// The guide refunds the participant removed from the Stripe dashboard.
+	if response := h.SendStripeChargeRefunded(paid.GuideID, paid.StripePaymentIntentID, 1250, reservationMetadata); response.Code != http.StatusOK {
+		t.Fatalf("charge.refunded webhook: expected 200, got %d: %s", response.Code, response.Body)
+	}
+	// Delivered again, and late after an earlier one: the amount refunded never goes back.
+	h.SendStripeChargeRefunded(paid.GuideID, paid.StripePaymentIntentID, 1250, reservationMetadata)
+	h.SendStripeChargeRefunded(paid.GuideID, paid.StripePaymentIntentID, 500, reservationMetadata)
+
+	var got refundedReservation
+	h.Do(http.MethodGet, fmt.Sprintf("/reservations/%d", created.ID), nil, token).JSON(t, &got)
+	if got.AmountPaid != 1250 || got.AmountDue != 0 {
+		t.Errorf("expected 12,50 € kept and nothing due, got paid %d, due %d", got.AmountPaid, got.AmountDue)
+	}
+	if p := got.Payments[0]; p.Status != "partially_refunded" || p.RefundAmount == nil || *p.RefundAmount != 1250 {
+		t.Errorf("expected the payment partially refunded of 12,50 €, got %+v", p)
+	}
+
+	if response := addParticipants(h, created.ID, people(1, "Adulte"), token); response.Code != http.StatusOK {
+		t.Fatalf("adding a participant: expected 200, got %d: %s", response.Code, response.Body)
+	}
+	openConfirmation(h, ramble)
+	var confirmed reservationWithPayment
+	confirmReservation(h, created.ID, token).JSON(t, &confirmed)
+	if confirmed.Payment == nil || confirmed.Payment.Payment.Amount != 1250 {
+		t.Errorf("expected the 12,50 € of the participant added to be due, got %+v", confirmed.Payment)
+	}
+
+	if response := h.SendStripeChargeRefunded(paid.GuideID, paid.StripePaymentIntentID, 2500, reservationMetadata); response.Code != http.StatusOK {
+		t.Fatalf("charge.refunded webhook of the rest: expected 200, got %d: %s", response.Code, response.Body)
+	}
+	h.Do(http.MethodGet, fmt.Sprintf("/reservations/%d", created.ID), nil, token).JSON(t, &got)
+	if p := got.Payments[0]; got.AmountPaid != 0 || p.Status != "refunded" || p.RefundAmount == nil || *p.RefundAmount != 2500 {
+		t.Errorf("expected the payment entirely refunded, got %+v", got)
+	}
+}
+
+func TestChargeRefundedOnAPaymentUnknownIsRetriedOnlyWhenItIsAReservationPayment(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(payingFamilyRamble())
+
+	if response := h.SendStripeChargeRefunded(*ramble.PaymentGuideID, "pi_other_app", 1000, map[string]string{"order": "42"}); response.Code != http.StatusOK {
+		t.Errorf("payment of another application: expected 200, got %d: %s", response.Code, response.Body)
+	}
+	if response := h.SendStripeChargeRefunded(*ramble.PaymentGuideID, "pi_not_recorded_yet", 1000, map[string]string{"reservation_id": "1"}); response.Code == http.StatusOK {
+		t.Errorf("reservation payment not recorded yet: expected an error for Stripe to deliver it again, got 200")
+	}
+}

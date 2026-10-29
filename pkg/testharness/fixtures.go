@@ -307,6 +307,37 @@ func (h *Harness) SendStripeWebhookWithMetadata(guideID uint, eventType string, 
 			"object": map[string]any{"id": paymentIntentID, "object": "payment_intent", "metadata": metadata},
 		},
 	}
+	return h.sendStripeEvent(guideID, event)
+}
+
+// SendStripeChargeRefunded sends the paying guide's webhook the charge.refunded
+// event Stripe sends once the charge of the payment intent is refunded, from
+// the dashboard too: amountRefunded is the amount refunded on the charge so
+// far, all refunds included. The charge carries metadata.
+func (h *Harness) SendStripeChargeRefunded(guideID uint, paymentIntentID string, amountRefunded int64, metadata map[string]string) *Response {
+	h.t.Helper()
+
+	event := map[string]any{
+		"id":     fmt.Sprintf("evt_charge.refunded_%s_%d", paymentIntentID, amountRefunded),
+		"object": "event",
+		"type":   "charge.refunded",
+		"data": map[string]any{
+			"object": map[string]any{
+				"id":              "ch_" + paymentIntentID,
+				"object":          "charge",
+				"payment_intent":  paymentIntentID,
+				"amount_refunded": amountRefunded,
+				"metadata":        metadata,
+			},
+		},
+	}
+	return h.sendStripeEvent(guideID, event)
+}
+
+// sendStripeEvent sends the paying guide's webhook the event, signed as Stripe would.
+func (h *Harness) sendStripeEvent(guideID uint, event map[string]any) *Response {
+	h.t.Helper()
+
 	encoded, err := json.Marshal(event)
 	if err != nil {
 		h.t.Fatalf("encoding webhook event: %v", err)

@@ -170,6 +170,13 @@ type PaymentRepository interface {
 	// kept, as it is when the statement runs. It reports whether a payment was
 	// changed.
 	UpdateByStripePaymentIntentID(paymentIntentID string, kept []string, changes map[string]any) (bool, error)
+	// RecordRefundedAmount records, in a single statement, that refunded cents
+	// of the payment of the Stripe payment intent are refunded so far, all
+	// refunds included, and marks it partially_refunded, or refunded once
+	// refunded entirely, unless it records as much refunded already: the amount
+	// refunded recorded never decreases. The statement waits for the payment
+	// locked by ForPayment. It reports whether a payment was changed.
+	RecordRefundedAmount(paymentIntentID string, refunded int64, at time.Time) (bool, error)
 	Delete(id uint) error
 	GetTotalAmountByGuide(guideID uint, status string) (int64, error)
 	// ForReservation locks the reservation and runs decide in a transaction with
@@ -396,6 +403,23 @@ func (r *paymentRepository) UpdateByStripePaymentIntentID(paymentIntentID string
 	result := r.db.WithContext(ctx).Model(&Payment{}).
 		Where("stripe_payment_intent_id = ? AND status NOT IN ?", paymentIntentID, kept).
 		Updates(changes)
+	return result.RowsAffected > 0, result.Error
+}
+
+func (r *paymentRepository) RecordRefundedAmount(paymentIntentID string, refunded int64, at time.Time) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// The amount refunded recorded is RefundedAmount, in SQL.
+	result := r.db.WithContext(ctx).Model(&Payment{}).
+		Where("stripe_payment_intent_id = ?", paymentIntentID).
+		Where("COALESCE(refund_amount, CASE WHEN status = 'refunded' THEN amount ELSE 0 END) < ?", refunded).
+		Updates(map[string]any{
+			"refund_amount": refunded,
+			"refunded_at":   at,
+			"paid_at":       gorm.Expr("COALESCE(paid_at, ?)", at),
+			"status":        gorm.Expr("CASE WHEN ? >= amount THEN 'refunded' ELSE 'partially_refunded' END", refunded),
+		})
 	return result.RowsAffected > 0, result.Error
 }
 

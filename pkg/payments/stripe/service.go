@@ -41,6 +41,11 @@ type WebhookEventData struct {
 	EventType         string
 	PaymentIntentID   string
 	PaymentIntentData *stripe.PaymentIntent
+	// Metadata is the metadata of the payment intent, or of the charge.
+	Metadata map[string]string
+	// AmountRefunded is, for a charge.refunded event, the amount in cents
+	// refunded on the charge so far, all refunds included.
+	AmountRefunded int64
 }
 
 type stripeService struct{}
@@ -187,6 +192,7 @@ func (s *stripeService) ProcessWebhookEvent(event *stripe.Event) (*WebhookEventD
 			EventType:         string(event.Type),
 			PaymentIntentID:   paymentIntent.ID,
 			PaymentIntentData: &paymentIntent,
+			Metadata:          paymentIntent.Metadata,
 		}, nil
 
 	case "payment_intent.payment_failed":
@@ -200,6 +206,7 @@ func (s *stripeService) ProcessWebhookEvent(event *stripe.Event) (*WebhookEventD
 			EventType:         string(event.Type),
 			PaymentIntentID:   paymentIntent.ID,
 			PaymentIntentData: &paymentIntent,
+			Metadata:          paymentIntent.Metadata,
 		}, nil
 
 	case "payment_intent.canceled":
@@ -213,6 +220,7 @@ func (s *stripeService) ProcessWebhookEvent(event *stripe.Event) (*WebhookEventD
 			EventType:         string(event.Type),
 			PaymentIntentID:   paymentIntent.ID,
 			PaymentIntentData: &paymentIntent,
+			Metadata:          paymentIntent.Metadata,
 		}, nil
 
 	case "payment_intent.requires_action":
@@ -226,7 +234,26 @@ func (s *stripeService) ProcessWebhookEvent(event *stripe.Event) (*WebhookEventD
 			EventType:         string(event.Type),
 			PaymentIntentID:   paymentIntent.ID,
 			PaymentIntentData: &paymentIntent,
+			Metadata:          paymentIntent.Metadata,
 		}, nil
+
+	case "charge.refunded":
+		// Sent for every refund, made from the API or from the dashboard.
+		var charge stripe.Charge
+		err := json.Unmarshal(event.Data.Raw, &charge)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing charge.refunded event: %v", err)
+		}
+
+		data := &WebhookEventData{
+			EventType:      string(event.Type),
+			Metadata:       charge.Metadata,
+			AmountRefunded: charge.AmountRefunded,
+		}
+		if charge.PaymentIntent != nil {
+			data.PaymentIntentID = charge.PaymentIntent.ID
+		}
+		return data, nil
 
 	default:
 		// Ignore unsupported event types

@@ -361,16 +361,38 @@ func (s *paymentService) recordStatus(paymentIntentID string, kept []string, cha
 
 var errPaymentNotFound = errors.New("payment not found")
 
+// recordRefund records that refunded cents of the payment of the payment intent
+// are refunded so far, all refunds included, as Stripe knows it: refunds made
+// from the Stripe dashboard count too. A late event never lowers the amount
+// refunded recorded.
+func (s *paymentService) recordRefund(paymentIntentID string, refunded int64) error {
+	if paymentIntentID == "" {
+		return errPaymentNotFound
+	}
+	if _, err := s.paymentRepo.RecordRefundedAmount(paymentIntentID, refunded, time.Now()); err != nil {
+		return fmt.Errorf("failed to update payment: %w", err)
+	}
+
+	payment, err := s.paymentRepo.FindByStripePaymentIntentID(paymentIntentID)
+	if err != nil {
+		return fmt.Errorf("failed to find payment: %w", err)
+	}
+	if payment == nil {
+		return errPaymentNotFound
+	}
+	return nil
+}
+
 // ignoreForeignPayment ignores the failure to find the payment of the event when
 // its payment intent was not created by the application (it has no reservation
 // in its metadata), as another application on the same Stripe account may
 // create some. A reservation payment not recorded yet fails, so that Stripe
 // delivers the event again.
 func ignoreForeignPayment(eventData *stripe.WebhookEventData, err error) error {
-	if !errors.Is(err, errPaymentNotFound) || eventData.PaymentIntentData == nil {
+	if !errors.Is(err, errPaymentNotFound) {
 		return err
 	}
-	if _, ok := eventData.PaymentIntentData.Metadata["reservation_id"]; ok {
+	if _, ok := eventData.Metadata["reservation_id"]; ok {
 		return err
 	}
 	log.Printf("Ignoring webhook event %s on payment intent %s, not created by the application", eventData.EventType, eventData.PaymentIntentID)
@@ -529,6 +551,14 @@ func (s *paymentService) VerifyWebhookAndProcess(payload []byte, signature strin
 			return err
 		}
 		log.Printf("Updated payment status to requires_action for %s", eventData.PaymentIntentID)
+
+	case "charge.refunded":
+		err = ignoreForeignPayment(eventData, s.recordRefund(eventData.PaymentIntentID, eventData.AmountRefunded))
+		if err != nil {
+			log.Printf("Failed to record the refund of %s: %v", eventData.PaymentIntentID, err)
+			return err
+		}
+		log.Printf("Recorded %d cents refunded on %s", eventData.AmountRefunded, eventData.PaymentIntentID)
 
 	default:
 		log.Printf("Unhandled webhook event type: %s", eventData.EventType)

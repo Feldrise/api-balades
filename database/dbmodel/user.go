@@ -2,6 +2,7 @@ package dbmodel
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"feldrise.com/balade/pkg/model"
@@ -106,6 +107,10 @@ type UserRepository interface {
 	FindByEmail(email string, fieldsToInclude *UserFieldsToInclude) (*User, error)
 	Search(filter *UserFilter) ([]User, error)
 	Create(user *User) (*User, error)
+	// FindOrCreateByEmail returns the account of user.Email, whatever its case,
+	// or creates user with its profile. Concurrent calls for the same email end
+	// up with the same single account.
+	FindOrCreateByEmail(user *User) (*User, error)
 	Update(user *User) (*User, error)
 	Delete(id uint) error
 }
@@ -234,6 +239,46 @@ func (r *userRepository) Create(user *User) (*User, error) {
 	}
 
 	return user, nil
+}
+
+func (r *userRepository) FindOrCreateByEmail(user *User) (*User, error) {
+	existing, err := r.FindByEmail(user.Email, nil)
+	if err != nil || existing != nil {
+		return existing, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		profile := user.UserProfile
+
+		// Waits for a concurrent creation of the same email and then does nothing.
+		result := tx.Omit(clause.Associations).Clauses(clause.OnConflict{DoNothing: true}).Create(user)
+		if result.Error != nil || result.RowsAffected == 0 {
+			return result.Error
+		}
+
+		profile.UserID = user.ID
+		if err := tx.Create(&profile).Error; err != nil {
+			return err
+		}
+		user.UserProfile = profile
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if user.ID != 0 {
+		return user, nil
+	}
+
+	existing, err = r.FindByEmail(user.Email, nil)
+	if err == nil && existing == nil {
+		// The conflicting account is soft deleted.
+		return nil, fmt.Errorf("the account of %s is deleted", user.Email)
+	}
+	return existing, err
 }
 
 func (r *userRepository) Update(user *User) (*User, error) {

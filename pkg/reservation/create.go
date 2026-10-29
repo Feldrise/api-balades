@@ -82,14 +82,6 @@ func (config *Config) decideInitialStatus(reservation *dbmodel.Reservation, ramb
 // findOrCreateBooker returns the single account of the booker, found or created
 // (without password) from the contact email.
 func (config *Config) findOrCreateBooker(data *model.ReservationCreatePayload) (*dbmodel.User, error) {
-	user, err := config.UserRepository.FindByEmail(data.ContactEmail, nil)
-	if err != nil {
-		return nil, err
-	}
-	if user != nil {
-		return user, nil
-	}
-
 	profile := dbmodel.UserProfile{Phone: data.ContactPhone}
 	for _, participant := range data.Participants {
 		if participant.IsBooker {
@@ -99,7 +91,7 @@ func (config *Config) findOrCreateBooker(data *model.ReservationCreatePayload) (
 		}
 	}
 
-	return config.UserRepository.Create(&dbmodel.User{
+	return config.UserRepository.FindOrCreateByEmail(&dbmodel.User{
 		Email:       data.ContactEmail,
 		UserProfile: profile,
 	})

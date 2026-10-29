@@ -713,6 +713,58 @@ definitions:
         description: pending, succeeded, failed, cancelled, refunded
         type: string
     type: object
+  ReservationWithPayment:
+    properties:
+      cancellation_date:
+        type: string
+      cancellation_reason:
+        type: string
+      confirmation_date:
+        type: string
+      confirmation_deadline:
+        type: string
+      contact_email:
+        type: string
+      created_at:
+        type: string
+      estimated_amount:
+        description: EstimatedAmount is the amount in cents computed from the participants'
+          known prices.
+        type: integer
+      has_missing_prices:
+        description: |-
+          HasMissingPrices tells that a participant's price is unknown, so that
+          EstimatedAmount is incomplete.
+        type: boolean
+      has_successful_payment:
+        description: |-
+          HasSuccessfulPayment tells that a payment succeeded: after a removal or a
+          cancellation, the booker is invited to contact the guide for a refund.
+        type: boolean
+      id:
+        type: integer
+      participants:
+        items:
+          $ref: '#/definitions/Participant'
+        type: array
+      payment:
+        $ref: '#/definitions/PaymentResponse'
+      payments:
+        items:
+          $ref: '#/definitions/ReservationPayment'
+        type: array
+      ramble:
+        $ref: '#/definitions/RambleRegistrationSummary'
+      ramble_id:
+        type: integer
+      status:
+        description: pending, confirmed, waiting_list, cancelled
+        type: string
+      updated_at:
+        type: string
+      user_id:
+        type: integer
+    type: object
   VerifyAuthenticatePostPayload:
     properties:
       code:
@@ -2350,13 +2402,52 @@ paths:
       summary: Cancel a reservation
       tags:
       - reservations
+  /reservations/{id}/confirm:
+    put:
+      description: Confirm a pending reservation, for its booker only. When online
+        payment is enabled, payment holds the payment of the amount due, computed
+        from the participants' prices.
+      parameters:
+      - description: Reservation ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ReservationWithPayment'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "409":
+          description: missing_prices, reservation_waiting_list or reservation_cancelled
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Confirm a reservation
+      tags:
+      - reservations
   /reservations/{id}/participants:
     post:
       consumes:
       - application/json
-      description: Add participants to a pending reservation if they all fit in the
-        places left, or to a reservation in waiting list. The booker receives a summary
-        email.
+      description: Add participants to a pending or confirmed reservation if they
+        all fit in the places left, or to a reservation in waiting list. Participants
+        added to a confirmed reservation are confirmed, and payment holds the complementary
+        payment of their prices when online payment is enabled. The booker receives
+        a summary email.
       parameters:
       - description: Reservation ID
         in: path
@@ -2375,7 +2466,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/Reservation'
+            $ref: '#/definitions/ReservationWithPayment'
         "400":
           description: Bad Request
           schema:
@@ -2393,7 +2484,7 @@ paths:
           schema:
             $ref: '#/definitions/ErrResponse'
         "409":
-          description: not_enough_places, reservation_cancelled or reservation_confirmed
+          description: not_enough_places or reservation_cancelled
           schema:
             $ref: '#/definitions/ErrResponse'
       summary: Add participants to a reservation

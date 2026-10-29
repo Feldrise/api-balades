@@ -2367,9 +2367,62 @@
                 }
             }
         },
+        "/reservations/{id}/confirm": {
+            "put": {
+                "description": "Confirm a pending reservation, for its booker only. When online payment is enabled, payment holds the payment of the amount due, computed from the participants' prices.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reservations"
+                ],
+                "summary": "Confirm a reservation",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Reservation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ReservationWithPayment"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "missing_prices, reservation_waiting_list or reservation_cancelled",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/reservations/{id}/participants": {
             "post": {
-                "description": "Add participants to a pending reservation if they all fit in the places left, or to a reservation in waiting list. The booker receives a summary email.",
+                "description": "Add participants to a pending or confirmed reservation if they all fit in the places left, or to a reservation in waiting list. Participants added to a confirmed reservation are confirmed, and payment holds the complementary payment of their prices when online payment is enabled. The booker receives a summary email.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2402,7 +2455,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/Reservation"
+                            "$ref": "#/definitions/ReservationWithPayment"
                         }
                     },
                     "400": {
@@ -2430,7 +2483,7 @@
                         }
                     },
                     "409": {
-                        "description": "not_enough_places, reservation_cancelled or reservation_confirmed",
+                        "description": "not_enough_places or reservation_cancelled",
                         "schema": {
                             "$ref": "#/definitions/ErrResponse"
                         }
@@ -3618,6 +3671,75 @@
                 "status": {
                     "description": "pending, succeeded, failed, cancelled, refunded",
                     "type": "string"
+                }
+            }
+        },
+        "ReservationWithPayment": {
+            "type": "object",
+            "properties": {
+                "cancellation_date": {
+                    "type": "string"
+                },
+                "cancellation_reason": {
+                    "type": "string"
+                },
+                "confirmation_date": {
+                    "type": "string"
+                },
+                "confirmation_deadline": {
+                    "type": "string"
+                },
+                "contact_email": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "estimated_amount": {
+                    "description": "EstimatedAmount is the amount in cents computed from the participants' known prices.",
+                    "type": "integer"
+                },
+                "has_missing_prices": {
+                    "description": "HasMissingPrices tells that a participant's price is unknown, so that\nEstimatedAmount is incomplete.",
+                    "type": "boolean"
+                },
+                "has_successful_payment": {
+                    "description": "HasSuccessfulPayment tells that a payment succeeded: after a removal or a\ncancellation, the booker is invited to contact the guide for a refund.",
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "participants": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/Participant"
+                    }
+                },
+                "payment": {
+                    "$ref": "#/definitions/PaymentResponse"
+                },
+                "payments": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ReservationPayment"
+                    }
+                },
+                "ramble": {
+                    "$ref": "#/definitions/RambleRegistrationSummary"
+                },
+                "ramble_id": {
+                    "type": "integer"
+                },
+                "status": {
+                    "description": "pending, confirmed, waiting_list, cancelled",
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "integer"
                 }
             }
         },

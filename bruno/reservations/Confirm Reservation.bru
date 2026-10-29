@@ -1,0 +1,29 @@
+meta {
+  name: Confirm Reservation
+  type: http
+  seq: 8
+}
+
+put {
+  url: {{base_url}}/reservations/{{reservation_id}}/confirm
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+docs {
+  Confirms the reservation, for its booker only. When online payment is enabled, payment holds the Stripe payment of the amount due, computed from the participants' prices. Calling it again on a confirmed reservation gives the payment of what is still due. Refused with missing_prices while a participant's price is unknown.
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("Reservation is confirmed", function() {
+    expect(res.getBody().status).to.equal("confirmed");
+  });
+}

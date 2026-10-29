@@ -159,6 +159,8 @@ func unlock(conn *sql.Conn) {
 	conn.Close()
 }
 
+// resetDatabase empties every table but the seeded reference data, and restarts
+// identities. DELETE is used rather than TRUNCATE, which is much slower on small tables.
 func resetDatabase(t *testing.T, db *gorm.DB) {
 	t.Helper()
 
@@ -167,28 +169,39 @@ func resetDatabase(t *testing.T, db *gorm.DB) {
 		t.Fatalf("listing tables: %v", err)
 	}
 
-	toTruncate := make([]string, 0, len(tables))
-	for _, table := range tables {
-		if !preservedTables[table] {
-			toTruncate = append(toTruncate, `"`+table+`"`)
+	err := db.Transaction(func(tx *gorm.DB) error {
+		// Skips foreign key checks, so that tables can be emptied in any order.
+		if err := tx.Exec("SET LOCAL session_replication_role = replica").Error; err != nil {
+			return err
 		}
-	}
-	if len(toTruncate) == 0 {
-		return
-	}
 
-	query := "TRUNCATE TABLE "
-	for i, table := range toTruncate {
-		if i > 0 {
-			query += ", "
+		for _, table := range tables {
+			if preservedTables[table] {
+				continue
+			}
+			if err := tx.Exec(`DELETE FROM "` + table + `"`).Error; err != nil {
+				return err
+			}
 		}
-		query += table
-	}
-	query += " RESTART IDENTITY CASCADE"
 
-	if err := db.Exec(query).Error; err != nil {
+		return tx.Exec(`
+			SELECT setval(pg_get_serial_sequence(quote_ident(c.table_name), c.column_name), 1, false)
+			FROM information_schema.columns c
+			WHERE c.table_schema = 'public'
+			  AND c.column_default LIKE 'nextval%'
+			  AND c.table_name NOT IN ?`, preservedTableNames()).Error
+	})
+	if err != nil {
 		t.Fatalf("resetting test database: %v", err)
 	}
+}
+
+func preservedTableNames() []string {
+	names := make([]string, 0, len(preservedTables))
+	for name := range preservedTables {
+		names = append(names, name)
+	}
+	return names
 }
 
 // Response is a recorded HTTP response.

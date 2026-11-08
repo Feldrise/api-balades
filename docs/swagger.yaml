@@ -211,6 +211,18 @@ definitions:
         type: boolean
       last_name:
         type: string
+      presence_marked_at:
+        description: PresenceMarkedAt is when the presence was last changed, as recorded
+          on the guide's phone.
+        type: string
+      presence_marked_by:
+        description: PresenceMarkedBy is the ID of the account that last changed the
+          presence.
+        type: integer
+      present:
+        description: 'Present is the presence at the ramble: null while not marked,
+          true when present, false when absent.'
+        type: boolean
       price_amount:
         description: PriceAmount is the amount in euros of the participant's price,
           0 when the price is missing.
@@ -326,6 +338,46 @@ definitions:
       publishable_key:
         description: Stripe publishable key for frontend
         type: string
+    type: object
+  PresenceChangePayload:
+    properties:
+      marked_at:
+        description: |-
+          MarkedAt is when the change was made on the phone: the latest change wins.
+          It defaults to now, and a time in the future counts as now.
+        type: string
+      participant_id:
+        type: integer
+      present:
+        description: Present is true when present, false when absent, null to unmark.
+        type: boolean
+    type: object
+  PresenceOutcome:
+    properties:
+      outcome:
+        type: string
+      participant_id:
+        type: integer
+      presence_marked_at:
+        type: string
+      presence_marked_by:
+        type: integer
+      present:
+        type: boolean
+    type: object
+  PresenceUpdatePayload:
+    properties:
+      changes:
+        items:
+          $ref: '#/definitions/PresenceChangePayload'
+        type: array
+    type: object
+  PresenceUpdateResponse:
+    properties:
+      participants:
+        items:
+          $ref: '#/definitions/PresenceOutcome'
+        type: array
     type: object
   Ramble:
     properties:
@@ -493,6 +545,10 @@ definitions:
         type: string
       contact_email:
         type: string
+      contact_phone:
+        description: ContactPhone is the phone of the booker, from their account,
+          null when they gave none.
+        type: string
       created_at:
         type: string
       estimated_amount:
@@ -595,6 +651,10 @@ definitions:
       confirmation_deadline:
         type: string
       contact_email:
+        type: string
+      contact_phone:
+        description: ContactPhone is the phone of the booker, from their account,
+          null when they gave none.
         type: string
       created_at:
         type: string
@@ -2238,6 +2298,58 @@ paths:
           schema:
             $ref: '#/definitions/ErrResponse'
       summary: Bulk action on reservations (admin)
+      tags:
+      - admin
+      - reservations
+  /reservations/admin/rambles/{rambleId}/presence:
+    put:
+      consumes:
+      - application/json
+      description: 'Records the presence of participants of the ramble''s reservations,
+        from the day of the ramble (Paris time). Each change says when it was made
+        on the guide''s phone: the latest change wins, so changes queued offline can
+        be sent again safely. A change is refused per participant (outcome reservation_cancelled
+        or unknown_participant) without failing the others.'
+      parameters:
+      - description: Ramble ID
+        in: path
+        name: rambleId
+        required: true
+        type: integer
+      - description: Presence changes
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/PresenceUpdatePayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/PresenceUpdateResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "409":
+          description: ramble_not_started
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Mark the presence of participants (admin or guide)
       tags:
       - admin
       - reservations

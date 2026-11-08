@@ -182,6 +182,32 @@ func TestStartupMigratesGroupsAsOneReservationOfTheirContact(t *testing.T) {
 	}
 }
 
+func TestStartupMigratesAGroupSharingTheContactEmailWithASingleBooker(t *testing.T) {
+	h := testharness.New(t)
+	l := legacy{t, h}
+	ramble := h.CreateRamble(familyRamble())
+	group := l.group(ramble, "parent@example.com", "pending")
+	l.registration(ramble, "Paul", "parent@example.com", "cancelled", &group.ID)
+	l.registration(ramble, "Léa", "parent@example.com", "pending", &group.ID)
+	l.registration(ramble, "Hugo", "parent@example.com", "pending", &group.ID)
+
+	h.MigrateAtStartup()
+
+	mine := myReservations(t, h, "parent@example.com")
+	if len(mine) != 1 {
+		t.Fatalf("expected the group as one reservation of its contact, got %d", len(mine))
+	}
+	var bookers []string
+	for _, participant := range mine[0].Participants {
+		if participant.IsBooker {
+			bookers = append(bookers, participant.FirstName)
+		}
+	}
+	if len(bookers) != 1 || bookers[0] != "Léa" {
+		t.Errorf("expected Léa, the first active participant with the contact email, as the only booker, got %v", bookers)
+	}
+}
+
 func TestMigratedParticipantsOfARambleWithSeveralPricesHaveAMissingPrice(t *testing.T) {
 	h := testharness.New(t)
 	l := legacy{t, h}

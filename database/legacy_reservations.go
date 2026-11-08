@@ -48,6 +48,9 @@ func MigrateLegacyRegistrations(database *gorm.DB) error {
 		return err
 	}
 
+	// A group without registrations left has nothing to migrate: it is skipped
+	// at every startup.
+	migratedGroupCount := 0
 	for _, group := range groups {
 		if len(group.Registrations) == 0 {
 			continue
@@ -55,6 +58,7 @@ func MigrateLegacyRegistrations(database *gorm.DB) error {
 		if err := database.Transaction(func(tx *gorm.DB) error { return migrateLegacyGroup(tx, group) }); err != nil {
 			return fmt.Errorf("migrating registration group %d: %w", group.ID, err)
 		}
+		migratedGroupCount++
 	}
 
 	for _, registration := range registrations {
@@ -63,8 +67,8 @@ func MigrateLegacyRegistrations(database *gorm.DB) error {
 		}
 	}
 
-	if len(groups)+len(registrations) > 0 {
-		log.Printf("Migrated legacy registrations to reservations (groups: %d, registrations: %d)", len(groups), len(registrations))
+	if migratedGroupCount+len(registrations) > 0 {
+		log.Printf("Migrated legacy registrations to reservations (groups: %d, registrations: %d)", migratedGroupCount, len(registrations))
 	}
 
 	return normalizeLegacyPartialRefunds(database)
@@ -186,12 +190,17 @@ func migrateLegacyGroup(tx *gorm.DB, group dbmodel.RambleRegistrationGroup) erro
 		registrationIDs[i] = registration.ID
 	}
 
+	// A reservation has at most one booker: the first participant with the
+	// contact email, as several members of a family shared it.
+	hasBooker := false
 	for _, registration := range kept {
+		isBooker := !hasBooker && strings.EqualFold(registration.Email, group.PrimaryEmail)
+		hasBooker = hasBooker || isBooker
 		reservation.Participants = append(reservation.Participants, dbmodel.Participant{
 			FirstName:  registration.FirstName,
 			LastName:   registration.LastName,
 			PriceLabel: priceLabel,
-			IsBooker:   strings.EqualFold(registration.Email, group.PrimaryEmail),
+			IsBooker:   isBooker,
 		})
 
 		// Fill the dates the group lacks from its participants.

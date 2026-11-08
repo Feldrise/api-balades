@@ -15,6 +15,8 @@ type Reservation struct {
 	RambleID     uint   `json:"ramble_id"`
 	UserID       uint   `json:"user_id"`
 	ContactEmail string `json:"contact_email"`
+	// ContactPhone is the phone of the booker, from their account, null when they gave none.
+	ContactPhone *string `json:"contact_phone"`
 
 	Status               string     `json:"status"` // pending, confirmed, waiting_list, cancelled
 	ConfirmationDeadline *time.Time `json:"confirmation_deadline,omitempty"`
@@ -69,6 +71,13 @@ type Participant struct {
 	// unknown, as for participants migrated from a ramble with several prices.
 	PriceMissing bool `json:"price_missing"`
 	IsBooker     bool `json:"is_booker"`
+
+	// Present is the presence at the ramble: null while not marked, true when present, false when absent.
+	Present *bool `json:"present"`
+	// PresenceMarkedAt is when the presence was last changed, as recorded on the guide's phone.
+	PresenceMarkedAt *time.Time `json:"presence_marked_at"`
+	// PresenceMarkedBy is the ID of the account that last changed the presence.
+	PresenceMarkedBy *uint `json:"presence_marked_by"`
 } // @name Participant
 
 type ReservationPayment struct {

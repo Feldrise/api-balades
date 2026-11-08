@@ -58,6 +58,15 @@ type Participant struct {
 	PriceLabel string `gorm:"not null;default:''"`
 	// IsBooker marks the participant who is the booker themself.
 	IsBooker bool `gorm:"not null;default:false"`
+
+	// Present is the presence of the participant at the ramble: nil while not
+	// marked, true when present, false when absent.
+	Present *bool
+	// PresenceMarkedAt is when the presence was last changed, as the guide's
+	// phone recorded it: the latest change wins over one made earlier.
+	PresenceMarkedAt *time.Time
+	// PresenceMarkedByID is the account that last changed the presence.
+	PresenceMarkedByID *uint
 }
 
 // BookerName is the name of the booker, from their participant line or else
@@ -175,6 +184,10 @@ func (r *Reservation) ToModel() *model.Reservation {
 			PriceAmount:  r.Ramble.PriceAmount(participant.PriceLabel),
 			PriceMissing: r.Ramble.PriceMissing(participant.PriceLabel),
 			IsBooker:     participant.IsBooker,
+
+			Present:          participant.Present,
+			PresenceMarkedAt: participant.PresenceMarkedAt,
+			PresenceMarkedBy: participant.PresenceMarkedByID,
 		}
 	}
 
@@ -199,6 +212,7 @@ func (r *Reservation) ToModel() *model.Reservation {
 		RambleID:             r.RambleID,
 		UserID:               r.UserID,
 		ContactEmail:         r.ContactEmail,
+		ContactPhone:         r.User.UserProfile.Phone,
 		Status:               r.Status,
 		ConfirmationDeadline: r.ConfirmationDeadline,
 		ConfirmationDate:     r.ConfirmationDate,
@@ -275,6 +289,30 @@ type ReservationRepository interface {
 	// FindWithOpenPayments returns the reservations, deleted ones included,
 	// that have an open payment, without their associations.
 	FindWithOpenPayments() ([]Reservation, error)
+	// MarkPresence records change on the participant of a reservation of the
+	// ramble, unless the presence recorded was changed at the same time or later.
+	MarkPresence(rambleID uint, change PresenceChange) (PresenceResult, error)
+}
+
+// PresenceChange is a change of the presence of a participant made by a guide or an admin.
+type PresenceChange struct {
+	ParticipantID uint
+	// Present is nil to unmark the participant.
+	Present *bool
+	// MarkedAt is when the change was made: the latest change wins.
+	MarkedAt   time.Time
+	MarkedByID uint
+}
+
+// PresenceResult tells what became of a presence change.
+type PresenceResult struct {
+	// Participant is the participant as stored after the change, nil when the
+	// ramble has no such participant.
+	Participant *Participant
+	// ReservationStatus is the status of the participant's reservation.
+	ReservationStatus string
+	// Applied tells that the change was recorded.
+	Applied bool
 }
 
 // LockedRamble gives the changes allowed on the reservations of a ramble while it is locked.
@@ -606,4 +644,53 @@ func (r *reservationRepository) FindRequestedPendingRambleOnOrBefore(date time.T
 		Order("reservations.created_at ASC").
 		Find(&reservations).Error
 	return reservations, err
+}
+
+func (r *reservationRepository) MarkPresence(rambleID uint, change PresenceChange) (PresenceResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result := PresenceResult{}
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		find := func() error {
+			var found struct {
+				Participant
+				ReservationStatus string
+			}
+			err := tx.Model(&Participant{}).
+				Select("participants.*, reservations.status AS reservation_status").
+				Joins("JOIN reservations ON reservations.id = participants.reservation_id AND reservations.deleted_at IS NULL").
+				Where("participants.id = ? AND reservations.ramble_id = ?", change.ParticipantID, rambleID).
+				Take(&found).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				result.Participant = nil
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			result.Participant = &found.Participant
+			result.ReservationStatus = found.ReservationStatus
+			return nil
+		}
+
+		if err := find(); err != nil || result.Participant == nil || result.ReservationStatus == ReservationStatusCancelled {
+			return err
+		}
+
+		update := tx.Model(&Participant{}).
+			Where("id = ? AND (presence_marked_at IS NULL OR presence_marked_at < ?)", change.ParticipantID, change.MarkedAt).
+			Updates(map[string]any{
+				"present":               change.Present,
+				"presence_marked_at":    change.MarkedAt,
+				"presence_marked_by_id": change.MarkedByID,
+			})
+		if update.Error != nil {
+			return update.Error
+		}
+		result.Applied = update.RowsAffected > 0
+
+		return find()
+	})
+	return result, err
 }

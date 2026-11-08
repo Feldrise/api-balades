@@ -11,6 +11,7 @@ import (
 	"feldrise.com/balade/database/dbmodel"
 	reservations "feldrise.com/balade/pkg/reservation"
 	"feldrise.com/balade/pkg/testharness"
+	stripego "github.com/stripe/stripe-go/v83"
 	"gorm.io/gorm"
 )
 
@@ -1025,5 +1026,95 @@ func TestChargeRefundedOnAPaymentUnknownIsRetriedOnlyWhenItIsAReservationPayment
 	}
 	if response := h.SendStripeChargeRefunded(*ramble.PaymentGuideID, "pi_not_recorded_yet", 1000, map[string]string{"reservation_id": "1"}); response.Code == http.StatusOK {
 		t.Errorf("reservation payment not recorded yet: expected an error for Stripe to deliver it again, got 200")
+	}
+}
+
+// collectedWithoutWebhook leaves the payment of 25,00 € of a reservation of two
+// adults obsolete, its cancellation on Stripe having failed, then makes Stripe
+// give it status without any webhook, as when the payer paid it meanwhile.
+func collectedWithoutWebhook(t *testing.T, h *testharness.Harness, status stripego.PaymentIntentStatus) (reservationID uint, intent string, token string) {
+	t.Helper()
+
+	ramble := h.CreateRamble(payingFamilyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	token = h.Login("alice@example.com")
+	openConfirmation(h, ramble)
+	confirmReservation(h, created.ID, token)
+	intent = h.Stripe.PaymentIntents()[0].ID
+
+	h.Stripe.SetCancellationFailing(true)
+	if response := removeParticipant(h, created.ID, created.Participants[1].ID, token); response.Code != http.StatusOK {
+		t.Fatalf("removing: expected 200, got %d: %s", response.Code, response.Body)
+	}
+	h.Stripe.SetCancellationFailing(false)
+	h.Stripe.SetPaymentIntentStatus(intent, status)
+	return created.ID, intent, token
+}
+
+func TestReconciliationRecordsAnObsoletePaymentCollectedWithoutItsWebhook(t *testing.T) {
+	h := testharness.New(t)
+	reservationID, _, token := collectedWithoutWebhook(t, h, stripego.PaymentIntentStatusSucceeded)
+
+	if err := reservations.New(h.Config).ReconcileOpenPayments(); err != nil {
+		t.Fatalf("reconciling the open payments: %v", err)
+	}
+
+	var got refundedReservation
+	h.Do(http.MethodGet, fmt.Sprintf("/reservations/%d", reservationID), nil, token).JSON(t, &got)
+	if len(got.Payments) != 1 || got.Payments[0].Status != "succeeded" {
+		t.Fatalf("expected the payment collected on Stripe recorded succeeded, got %+v", got.Payments)
+	}
+	if !got.HasSuccessfulPayment || got.AmountPaid != 2500 || got.AmountDue != 0 {
+		t.Errorf("expected 25,00 € paid and nothing due, got paid %d, due %d, successful %v", got.AmountPaid, got.AmountDue, got.HasSuccessfulPayment)
+	}
+	if cancelled := h.Stripe.CancelledPaymentIntents(); len(cancelled) != 0 {
+		t.Errorf("expected nothing cancelled on Stripe, got %v", cancelled)
+	}
+}
+
+func TestReconciliationLeavesAnObsoletePaymentBeingCollectedToItsWebhook(t *testing.T) {
+	h := testharness.New(t)
+	reservationID, _, token := collectedWithoutWebhook(t, h, stripego.PaymentIntentStatusProcessing)
+
+	if err := reservations.New(h.Config).ReconcileOpenPayments(); err != nil {
+		t.Fatalf("reconciling the open payments: %v", err)
+	}
+	if got := getReservation(t, h, reservationID, token); len(got.Payments) != 1 || got.Payments[0].Status != "pending" {
+		t.Fatalf("expected the payment being collected left pending, got %+v", got.Payments)
+	}
+	// Confirming again must neither fail on it nor prepare a second payment.
+	var confirmed reservationWithPayment
+	if response := confirmReservation(h, reservationID, token); response.Code == http.StatusOK {
+		response.JSON(t, &confirmed)
+		if confirmed.Payment != nil {
+			t.Errorf("expected no payment prepared while another is being collected, got %+v", confirmed.Payment)
+		}
+	}
+	if cancelled := h.Stripe.CancelledPaymentIntents(); len(cancelled) != 0 || len(h.Stripe.PaymentIntents()) != 1 {
+		t.Errorf("expected nothing cancelled nor created on Stripe, got cancelled %v, created %+v", cancelled, h.Stripe.PaymentIntents())
+	}
+}
+
+func TestConfirmingAgainRecordsThePendingPaymentCollectedWithoutItsWebhook(t *testing.T) {
+	h := testharness.New(t)
+	ramble := h.CreateRamble(payingFamilyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	token := h.Login("alice@example.com")
+	openConfirmation(h, ramble)
+	confirmReservation(h, created.ID, token)
+	h.Stripe.SetPaymentIntentStatus(h.Stripe.PaymentIntents()[0].ID, stripego.PaymentIntentStatusSucceeded)
+
+	var confirmed reservationWithPayment
+	if response := confirmReservation(h, created.ID, token); response.Code == http.StatusOK {
+		response.JSON(t, &confirmed)
+	}
+
+	if confirmed.Payment != nil || len(h.Stripe.PaymentIntents()) != 1 {
+		t.Errorf("expected nothing more to pay, got %+v", confirmed.Payment)
+	}
+	var got refundedReservation
+	h.Do(http.MethodGet, fmt.Sprintf("/reservations/%d", created.ID), nil, token).JSON(t, &got)
+	if len(got.Payments) != 1 || got.Payments[0].Status != "succeeded" || got.AmountPaid != 2500 || got.AmountDue != 0 {
+		t.Errorf("expected the payment recorded succeeded and 25,00 € paid, got paid %d, due %d, payments %+v", got.AmountPaid, got.AmountDue, got.Payments)
 	}
 }

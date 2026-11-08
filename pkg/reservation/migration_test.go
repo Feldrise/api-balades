@@ -3,6 +3,7 @@ package reservation_test
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -205,6 +206,30 @@ func TestStartupMigratesAGroupSharingTheContactEmailWithASingleBooker(t *testing
 	}
 	if len(bookers) != 1 || bookers[0] != "Léa" {
 		t.Errorf("expected Léa, the first active participant with the contact email, as the only booker, got %v", bookers)
+	}
+}
+
+func TestConfirmationRequestAsksToSpecifyTheMissingPricesOfAMigratedReservation(t *testing.T) {
+	h := testharness.New(t)
+	l := legacy{t, h}
+	ramble := h.CreateRamble(familyRamble())
+	l.registration(ramble, "Alice", "alice@example.com", "pending", nil)
+	reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "bob@example.com", Participants: people(2, "Adulte")})
+	h.MigrateAtStartup()
+
+	h.Clock.Set(ramble.Date.Add(-3*24*time.Hour + time.Hour))
+	sendConfirmationRequests(t, h)
+
+	const mention = "Le tarif de certains participants n'est pas encore renseigné"
+	sent := map[string]string{}
+	for _, email := range h.Emails.SentWithTemplate("event_confirmation_request") {
+		sent[email.To] = email.Body
+	}
+	if body, ok := sent["alice@example.com"]; !ok || !strings.Contains(body, mention) {
+		t.Errorf("expected the request of the migrated reservation to ask to specify the missing prices, got %q", body)
+	}
+	if body, ok := sent["bob@example.com"]; !ok || strings.Contains(body, mention) {
+		t.Errorf("expected the request of a reservation with every price known without the mention, got %q", body)
 	}
 }
 

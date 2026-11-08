@@ -113,6 +113,7 @@ func (config *Config) sendConfirmationRequest(reservation *dbmodel.Reservation, 
 		Location:             formatLocation(reservation.Ramble.Location),
 		ConfirmationDeadline: formatDate(&deadline),
 		ReservationURL:       fmt.Sprintf("%s/mes-reservations/%d", config.ApplicationURL, reservation.ID),
+		HasMissingPrices:     reservation.HasMissingPrices(),
 	}
 
 	return config.EmailService.Send(

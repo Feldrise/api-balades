@@ -46,6 +46,9 @@ type EventConfirmationRequestData struct {
 	Location             string
 	ConfirmationDeadline string
 	ReservationURL       string
+	// HasMissingPrices tells that a participant's price is unknown, so that it
+	// must be specified before confirming.
+	HasMissingPrices bool
 }
 
 type RambleCancellationData struct {

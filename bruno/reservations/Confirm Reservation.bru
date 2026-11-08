@@ -1,0 +1,29 @@
+meta {
+  name: Confirm Reservation
+  type: http
+  seq: 8
+}
+
+put {
+  url: {{base_url}}/reservations/{{reservation_id}}/confirm
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+docs {
+  Confirms the pending reservation, for its booker only, from 3 days before the ramble (409 confirmation_not_open before) until the confirmation deadline 12 hours before (409 confirmation_deadline_passed after). When online payment is enabled, payment holds the Stripe payment of the amount due (amount_due), computed from the participants' prices minus the amount paid net of refunds; the pending payment of the same amount is given back rather than a new one. Calling it again on a confirmed reservation gives the payment of the balance, until the ramble starts (409 ramble_started). Refused with missing_prices while a participant's price is unknown, and ramble_cancelled on a cancelled ramble. When the reservation or its ramble changes while the payment is prepared (cancelled, back to pending...), no payment is made and the 409 tells why (reservation_cancelled, ramble_cancelled, reservation_not_confirmed...). payment_unavailable is true when the payment could not be prepared: call again later.
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("Reservation is confirmed", function() {
+    expect(res.getBody().status).to.equal("confirmed");
+  });
+}

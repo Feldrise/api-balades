@@ -176,6 +176,14 @@
                                                         Si vous ne confirmez pas avant cette date, votre place sera
                                                         automatiquement libérée pour les personnes en liste d'attente.
                                                     </p>
+                                                    {{if .HasMissingPrices}}
+                                                    <p
+                                                        style="font-size: 16px; font-family: 'Lato', Helvetica, Arial, sans-serif; color: #c53030; margin: 10px 0 0 0;">
+                                                        Le tarif de certains participants n'est pas encore renseigné :
+                                                        précisez-le dans l'application avant de confirmer, faute de quoi
+                                                        la réservation ne pourra pas être confirmée.
+                                                    </p>
+                                                    {{end}}
                                                 </td>
                                             </tr>
                                         </table>

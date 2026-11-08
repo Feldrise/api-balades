@@ -1,5 +1,39 @@
 basePath: /api/v1
 definitions:
+  AdminParticipantUpdatePayload:
+    properties:
+      first_name:
+        type: string
+      last_name:
+        type: string
+      price_label:
+        type: string
+    type: object
+  AdminReservationListResponse:
+    properties:
+      page:
+        type: integer
+      per_page:
+        type: integer
+      reservations:
+        items:
+          $ref: '#/definitions/Reservation'
+        type: array
+      total:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  AdminReservationStatusUpdatePayload:
+    properties:
+      reason:
+        type: string
+      send_email:
+        description: Whether to send the reservation summary to the booker
+        type: boolean
+      status:
+        type: string
+    type: object
   AuthenticatePostPayload:
     properties:
       email:
@@ -21,11 +55,287 @@ definitions:
     required:
     - email
     type: object
+  BulkReservationActionError:
+    properties:
+      error:
+        type: string
+      reservation_id:
+        type: integer
+    type: object
+  BulkReservationActionPayload:
+    properties:
+      action:
+        description: '"confirm", "cancel", "move_to_waiting", "delete"'
+        type: string
+      reason:
+        type: string
+      reservation_ids:
+        items:
+          type: integer
+        type: array
+      send_email:
+        description: Whether to send the reservation summary to the bookers
+        type: boolean
+    type: object
+  BulkReservationActionResult:
+    properties:
+      errors:
+        items:
+          $ref: '#/definitions/BulkReservationActionError'
+        type: array
+      failure_count:
+        type: integer
+      success_count:
+        type: integer
+      updated:
+        items:
+          $ref: '#/definitions/Reservation'
+        type: array
+    type: object
+  ErrResponse:
+    properties:
+      code:
+        description: application-specific error code
+        type: integer
+      error:
+        description: application-level error message, for debugging
+        type: string
+      reason:
+        description: machine-readable business error, for clients to react to
+        type: string
+      status:
+        description: user-level status message
+        type: string
+    type: object
+  Guide:
+    properties:
+      avatar:
+        type: string
+      bio:
+        type: string
+      certification_level:
+        type: string
+      created_at:
+        type: string
+      email:
+        type: string
+      emergency_contact_name:
+        type: string
+      emergency_contact_phone:
+        type: string
+      experience:
+        type: string
+      first_name:
+        type: string
+      id:
+        type: integer
+      is_active:
+        type: boolean
+      languages:
+        type: string
+      last_name:
+        type: string
+      payment_enabled:
+        type: boolean
+      phone:
+        type: string
+      specialties:
+        type: string
+      stripe_account_id:
+        description: Payment configuration (sensitive fields excluded for security)
+        type: string
+      stripe_public_key:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  GuideCreatePayload:
+    properties:
+      avatar_base64:
+        description: Base64 encoded image
+        type: string
+      bio:
+        type: string
+      certification_level:
+        type: string
+      email:
+        type: string
+      emergency_contact_name:
+        type: string
+      emergency_contact_phone:
+        type: string
+      experience:
+        type: string
+      first_name:
+        type: string
+      languages:
+        type: string
+      last_name:
+        type: string
+      phone:
+        type: string
+      specialties:
+        type: string
+    required:
+    - email
+    - first_name
+    - last_name
+    type: object
+  GuideLinkUserPayload:
+    properties:
+      user_id:
+        type: integer
+    required:
+    - user_id
+    type: object
+  GuidePaymentConfigPayload:
+    properties:
+      payment_enabled:
+        type: boolean
+      stripe_account_id:
+        type: string
+      stripe_public_key:
+        type: string
+      stripe_secret_key:
+        type: string
+      stripe_webhook_secret:
+        type: string
+    type: object
+  Participant:
+    properties:
+      first_name:
+        type: string
+      id:
+        type: integer
+      is_booker:
+        type: boolean
+      last_name:
+        type: string
+      price_amount:
+        description: PriceAmount is the amount in euros of the participant's price,
+          0 when the price is missing.
+        type: number
+      price_label:
+        type: string
+      price_missing:
+        description: |-
+          PriceMissing tells that the ramble has prices but the participant's is
+          unknown, as for participants migrated from a ramble with several prices.
+        type: boolean
+    type: object
+  ParticipantPayload:
+    properties:
+      first_name:
+        type: string
+      is_booker:
+        type: boolean
+      last_name:
+        type: string
+      price_label:
+        type: string
+    type: object
+  ParticipantUpdatePayload:
+    properties:
+      first_name:
+        type: string
+      last_name:
+        type: string
+      price_label:
+        type: string
+    type: object
+  ParticipantsAddPayload:
+    properties:
+      participants:
+        items:
+          $ref: '#/definitions/ParticipantPayload'
+        type: array
+    type: object
+  Payment:
+    properties:
+      amount:
+        description: Payment details
+        type: integer
+      created_at:
+        type: string
+      currency:
+        description: Currency code
+        type: string
+      failure_reason:
+        description: Reason for payment failure
+        type: string
+      group_id:
+        type: integer
+      guide:
+        allOf:
+        - $ref: '#/definitions/Guide'
+        description: Foreign Objects
+      guide_id:
+        description: Guide receiving payment
+        type: integer
+      id:
+        type: integer
+      paid_at:
+        description: Timestamps
+        type: string
+      payer_email:
+        description: Payer information
+        type: string
+      payer_name:
+        type: string
+      payment_method:
+        description: card, sepa, etc.
+        type: string
+      refund_amount:
+        description: Amount refunded in cents
+        type: integer
+      refunded_at:
+        type: string
+      registration_id:
+        description: Legacy registration relationship
+        type: integer
+      reservation_id:
+        description: Reservation relationship
+        type: integer
+      status:
+        description: pending, succeeded, failed, cancelled, refunded
+        type: string
+      stripe_charge_id:
+        type: string
+      stripe_payment_intent_id:
+        description: Stripe identifiers
+        type: string
+      updated_at:
+        type: string
+    type: object
+  PaymentRefundPayload:
+    properties:
+      amount:
+        description: Amount to refund in cents, if nil refunds full amount
+        type: integer
+      reason:
+        description: Reason for refund
+        type: string
+    type: object
+  PaymentResponse:
+    properties:
+      client_secret:
+        description: Stripe client secret for frontend
+        type: string
+      payment:
+        $ref: '#/definitions/Payment'
+      publishable_key:
+        description: Stripe publishable key for frontend
+        type: string
+    type: object
   Ramble:
     properties:
       additional_documents_url:
         type: string
-      cover_image_url:
+      cancellation_date:
+        type: string
+      cancellation_reason:
+        type: string
+      cover_image:
         type: string
       created_at:
         type: string
@@ -40,21 +350,46 @@ definitions:
       estimated_duration:
         description: store as HH:MM:SS
         type: string
+      guides:
+        items:
+          $ref: '#/definitions/Guide'
+        type: array
       id:
         type: integer
+      is_cancelled:
+        type: boolean
       location:
         type: string
       max_participants:
         type: integer
+      max_participants_per_reservation:
+        description: MaxParticipantsPerReservation is the capacity, or a safeguard
+          when the ramble is unlimited.
+        type: integer
+      meeting_latitude:
+        type: number
+      meeting_longitude:
+        type: number
       meeting_point:
         type: string
+      payment_enabled:
+        type: boolean
+      payment_guide:
+        $ref: '#/definitions/Guide'
+      payment_guide_id:
+        description: Payment fields
+        type: integer
+      payment_required:
+        type: boolean
+      places_left:
+        type: integer
       prerequisites:
         type: string
       prices:
         items:
           $ref: '#/definitions/model.RamblePrice'
         type: array
-      status:
+      published_at:
         type: string
       title:
         type: string
@@ -63,11 +398,20 @@ definitions:
       updated_at:
         type: string
     type: object
+  RambleCancelPayload:
+    properties:
+      reason:
+        type: string
+    required:
+    - reason
+    type: object
   RambleCreatePayload:
     properties:
-      additional_documents_url:
+      additional_document_base64:
+        description: Base64 encoded document
         type: string
-      cover_image_url:
+      cover_image_base64:
+        description: Base64 encoded cover image
         type: string
       date:
         type: string
@@ -80,18 +424,38 @@ definitions:
       estimated_duration:
         description: store as HH:MM:SS
         type: string
+      guide_ids:
+        description: Array of guide IDs
+        items:
+          type: integer
+        type: array
+      is_draft:
+        type: boolean
       location:
         type: string
       max_participants:
         type: integer
+      meeting_latitude:
+        type: number
+      meeting_longitude:
+        type: number
       meeting_point:
         type: string
+      payment_enabled:
+        type: boolean
+      payment_guide_id:
+        description: Payment fields
+        type: integer
+      payment_required:
+        type: boolean
       prerequisites:
         type: string
       prices:
         items:
           $ref: '#/definitions/model.RamblePrice'
         type: array
+      published_at:
+        type: string
       title:
         type: string
       type:
@@ -101,6 +465,182 @@ definitions:
     - prices
     - title
     - type
+    type: object
+  RambleDuplicatePayload:
+    properties:
+      date:
+        type: string
+      title:
+        type: string
+    type: object
+  Reservation:
+    properties:
+      amount_due:
+        description: 'AmountDue is the amount in cents left to pay: EstimatedAmount
+          minus AmountPaid, never below zero.'
+        type: integer
+      amount_paid:
+        description: 'AmountPaid is the amount in cents paid and kept: the payments
+          succeeded minus their refunds.'
+        type: integer
+      cancellation_date:
+        type: string
+      cancellation_reason:
+        type: string
+      confirmation_date:
+        type: string
+      confirmation_deadline:
+        type: string
+      contact_email:
+        type: string
+      created_at:
+        type: string
+      estimated_amount:
+        description: EstimatedAmount is the amount in cents computed from the participants'
+          known prices.
+        type: integer
+      has_missing_prices:
+        description: |-
+          HasMissingPrices tells that a participant's price is unknown, so that
+          EstimatedAmount is incomplete.
+        type: boolean
+      has_successful_payment:
+        description: |-
+          HasSuccessfulPayment tells that an amount paid is kept (a payment succeeded
+          and not entirely refunded): after a removal or a cancellation, the booker
+          is invited to contact the guide for a refund.
+        type: boolean
+      id:
+        type: integer
+      participants:
+        items:
+          $ref: '#/definitions/Participant'
+        type: array
+      payments:
+        items:
+          $ref: '#/definitions/ReservationPayment'
+        type: array
+      ramble:
+        $ref: '#/definitions/ReservationRamble'
+      ramble_id:
+        type: integer
+      status:
+        description: pending, confirmed, waiting_list, cancelled
+        type: string
+      updated_at:
+        type: string
+      user_id:
+        type: integer
+    type: object
+  ReservationCreatePayload:
+    properties:
+      contact_email:
+        type: string
+      contact_phone:
+        type: string
+      participants:
+        items:
+          $ref: '#/definitions/ParticipantPayload'
+        type: array
+      ramble_id:
+        type: integer
+    type: object
+  ReservationPayment:
+    properties:
+      amount:
+        description: Amount is in cents.
+        type: integer
+      created_at:
+        type: string
+      currency:
+        type: string
+      id:
+        type: integer
+      paid_at:
+        type: string
+      refund_amount:
+        type: integer
+      refunded_at:
+        type: string
+      status:
+        description: pending, requires_action, succeeded, failed, cancelled, partially_refunded,
+          refunded
+        type: string
+    type: object
+  ReservationRamble:
+    properties:
+      date:
+        type: string
+      location:
+        type: string
+      title:
+        type: string
+    type: object
+  ReservationWithPayment:
+    properties:
+      amount_due:
+        description: 'AmountDue is the amount in cents left to pay: EstimatedAmount
+          minus AmountPaid, never below zero.'
+        type: integer
+      amount_paid:
+        description: 'AmountPaid is the amount in cents paid and kept: the payments
+          succeeded minus their refunds.'
+        type: integer
+      cancellation_date:
+        type: string
+      cancellation_reason:
+        type: string
+      confirmation_date:
+        type: string
+      confirmation_deadline:
+        type: string
+      contact_email:
+        type: string
+      created_at:
+        type: string
+      estimated_amount:
+        description: EstimatedAmount is the amount in cents computed from the participants'
+          known prices.
+        type: integer
+      has_missing_prices:
+        description: |-
+          HasMissingPrices tells that a participant's price is unknown, so that
+          EstimatedAmount is incomplete.
+        type: boolean
+      has_successful_payment:
+        description: |-
+          HasSuccessfulPayment tells that an amount paid is kept (a payment succeeded
+          and not entirely refunded): after a removal or a cancellation, the booker
+          is invited to contact the guide for a refund.
+        type: boolean
+      id:
+        type: integer
+      participants:
+        items:
+          $ref: '#/definitions/Participant'
+        type: array
+      payment:
+        $ref: '#/definitions/PaymentResponse'
+      payment_unavailable:
+        description: |-
+          PaymentUnavailable tells that the change is saved but the payment could not
+          be prepared: it is to be made later, by confirming the reservation again.
+        type: boolean
+      payments:
+        items:
+          $ref: '#/definitions/ReservationPayment'
+        type: array
+      ramble:
+        $ref: '#/definitions/ReservationRamble'
+      ramble_id:
+        type: integer
+      status:
+        description: pending, confirmed, waiting_list, cancelled
+        type: string
+      updated_at:
+        type: string
+      user_id:
+        type: integer
     type: object
   VerifyAuthenticatePostPayload:
     properties:
@@ -121,6 +661,42 @@ definitions:
       amount:
         type: number
       label:
+        type: string
+    type: object
+  model.User:
+    properties:
+      createdAt:
+        type: string
+      email:
+        type: string
+      id:
+        type: integer
+      permissions:
+        items:
+          type: string
+        type: array
+      profile:
+        $ref: '#/definitions/model.UserProfile'
+      roles:
+        items:
+          type: string
+        type: array
+    type: object
+  model.UserProfile:
+    properties:
+      addressId:
+        type: integer
+      avatarName:
+        type: string
+      createdAt:
+        type: string
+      firstName:
+        type: string
+      id:
+        type: integer
+      lastName:
+        type: string
+      phone:
         type: string
     type: object
 host: api.balade.feldrise.com
@@ -243,6 +819,37 @@ paths:
       summary: Get the current user
       tags:
       - autentication
+  /authentication/users:
+    get:
+      description: Search users by email or name (admin only)
+      operationId: search-users
+      parameters:
+      - description: Search term
+        in: query
+        name: search
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.User'
+            type: array
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "403":
+          description: forbidden
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Search users
+      tags:
+      - autentication
   /authentication/verify-authentication:
     post:
       description: Verify the authentication code
@@ -274,15 +881,532 @@ paths:
       summary: Verify the authentication code
       tags:
       - autentication
+  /guides:
+    get:
+      description: Get all guides with optional active filter
+      operationId: get-all-guides
+      parameters:
+      - description: Filter by active status (true/false)
+        in: query
+        name: is_active
+        type: boolean
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/Guide'
+            type: array
+        "400":
+          description: bad request
+          schema:
+            type: string
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Get all Guides
+    post:
+      consumes:
+      - application/json
+      description: Create a new guide
+      operationId: create-guide
+      parameters:
+      - description: Guide data
+        in: body
+        name: guide
+        required: true
+        schema:
+          $ref: '#/definitions/GuideCreatePayload'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/Guide'
+        "400":
+          description: bad request
+          schema:
+            type: string
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Create Guide
+  /guides/{id}:
+    delete:
+      description: Delete a guide by its ID
+      operationId: delete-guide
+      parameters:
+      - description: Guide ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "404":
+          description: not found
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Delete a guide
+    get:
+      description: Get a guide by ID
+      operationId: get-guide
+      parameters:
+      - description: Guide ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Guide'
+        "400":
+          description: bad request
+          schema:
+            type: string
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "404":
+          description: not found
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Get Guide
+    put:
+      consumes:
+      - application/json
+      description: Update an existing guide with the provided data
+      operationId: update-guide
+      parameters:
+      - description: Guide ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Guide data
+        in: body
+        name: guide
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Guide'
+        "400":
+          description: bad request
+          schema:
+            type: string
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "404":
+          description: not found
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Update an existing guide
+  /guides/{id}/link-user:
+    post:
+      consumes:
+      - application/json
+      description: Link an existing guide profile to a user and grant the guide role
+      operationId: link-guide-user
+      parameters:
+      - description: Guide ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: User link data
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/GuideLinkUserPayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Guide'
+        "400":
+          description: bad request
+          schema:
+            type: string
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "404":
+          description: not found
+          schema:
+            type: string
+        "409":
+          description: conflict
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Link a guide to a user account
+  /guides/{id}/payment-config:
+    put:
+      consumes:
+      - application/json
+      description: Update payment configuration for a guide including Stripe credentials
+      operationId: update-guide-payment-config
+      parameters:
+      - description: Guide ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Payment configuration
+        in: body
+        name: config
+        required: true
+        schema:
+          $ref: '#/definitions/GuidePaymentConfigPayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: bad request
+          schema:
+            type: string
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "404":
+          description: not found
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Update payment configuration for a guide
+  /guides/me:
+    get:
+      description: Get the guide profile linked to the authenticated user
+      operationId: get-guide-me
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Guide'
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "404":
+          description: not found
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Get current user's guide profile
+    put:
+      consumes:
+      - application/json
+      description: Update the guide profile linked to the authenticated user
+      operationId: update-guide-me
+      parameters:
+      - description: Guide data
+        in: body
+        name: guide
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Guide'
+        "400":
+          description: bad request
+          schema:
+            type: string
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "404":
+          description: not found
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Update current user's guide profile
+  /guides/me/payment-config:
+    put:
+      consumes:
+      - application/json
+      description: Update payment configuration for the guide linked to the authenticated
+        user
+      operationId: update-guide-me-payment-config
+      parameters:
+      - description: Payment configuration
+        in: body
+        name: config
+        required: true
+        schema:
+          $ref: '#/definitions/GuidePaymentConfigPayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: bad request
+          schema:
+            type: string
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "404":
+          description: not found
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Update payment configuration for the current guide
+  /payments/{id}:
+    get:
+      description: Get payment details by ID, for the booker of its reservation or
+        authorized staff
+      parameters:
+      - description: Payment ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Payment'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Get payment by ID
+      tags:
+      - payments
+  /payments/{id}/refund:
+    post:
+      consumes:
+      - application/json
+      description: Process a refund for a payment (refund:payments or manage:payments)
+      parameters:
+      - description: Payment ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Refund payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/PaymentRefundPayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: 'reason: invalid_refund_amount (an amount below 1 cent)'
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "409":
+          description: 'reason: refund_exceeds_refundable (more than is left to refund,
+            nothing refunded), payment_not_refundable (the payment is not succeeded)'
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "422":
+          description: 'reason: refund_refused (Stripe refused the refund, nothing
+            refunded)'
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Refund payment
+      tags:
+      - payments
+  /payments/webhook:
+    post:
+      consumes:
+      - application/json
+      description: Handle Stripe webhook events for payment processing
+      parameters:
+      - description: Guide ID
+        in: query
+        name: guide_id
+        required: true
+        type: integer
+      - description: Stripe signature
+        in: header
+        name: Stripe-Signature
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Handle Stripe webhook
+      tags:
+      - payments
   /rambles:
     get:
-      description: Get all rambles with optional status filter
+      description: Get all rambles with optional filters
       operationId: get-all-rambles
       parameters:
-      - description: Filter by status (e.g., 'active', 'archived')
+      - description: Filter by cancellation status
         in: query
-        name: status
+        name: is_cancelled
+        type: boolean
+      - description: Filter by ramble type
+        in: query
+        name: type
         type: string
+      - description: Filter by difficulty level
+        in: query
+        name: difficulty
+        type: string
+      - description: Filter by location (partial match)
+        in: query
+        name: location
+        type: string
+      - description: Search in title, description, or location
+        in: query
+        name: search
+        type: string
+      - description: Filter rambles from this date (RFC3339 format)
+        in: query
+        name: date_from
+        type: string
+      - description: Filter rambles to this date (RFC3339 format)
+        in: query
+        name: date_to
+        type: string
+      - description: Filter rambles by specific guide ID
+        in: query
+        name: guide_id
+        type: integer
+      - description: Include unpublished rambles (requires create:ramble or update:ramble
+          permission)
+        in: query
+        name: include_unpublished
+        type: boolean
       responses:
         "200":
           description: OK
@@ -434,4 +1558,687 @@ paths:
           schema:
             type: string
       summary: Update an existing ramble
+  /rambles/{id}/cancel:
+    put:
+      consumes:
+      - application/json
+      description: Cancel a ramble with a reason
+      operationId: cancel-ramble
+      parameters:
+      - description: Ramble ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Cancellation data
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/RambleCancelPayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Ramble'
+        "400":
+          description: bad request
+          schema:
+            type: string
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "404":
+          description: not found
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Cancel a ramble
+  /rambles/{id}/duplicate:
+    post:
+      consumes:
+      - application/json
+      description: Create a copy of an existing ramble with a new date. The copy starts
+        as an unpublished draft.
+      operationId: duplicate-ramble
+      parameters:
+      - description: Ramble ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Optional overrides for the duplicate
+        in: body
+        name: payload
+        schema:
+          $ref: '#/definitions/RambleDuplicatePayload'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/Ramble'
+        "400":
+          description: bad request
+          schema:
+            type: string
+        "401":
+          description: unauthorized
+          schema:
+            type: string
+        "404":
+          description: not found
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Duplicate a ramble
+  /reservations:
+    get:
+      description: Get the reservations of the authenticated booker, with participants,
+        prices, status, estimated amount and payments
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/Reservation'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Get the user's reservations
+      tags:
+      - reservations
+    post:
+      consumes:
+      - application/json
+      description: 'Reserve a ramble for one or more participants. Public: the booker''s
+        account is found or created from the contact email.'
+      parameters:
+      - description: Reservation data
+        in: body
+        name: reservation
+        required: true
+        schema:
+          $ref: '#/definitions/ReservationCreatePayload'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/Reservation'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "409":
+          description: reservation_already_exists or ramble_cancelled
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Create a reservation
+      tags:
+      - reservations
+  /reservations/{id}:
+    get:
+      description: Get a reservation, for its booker or an admin or guide allowed
+        to view the ramble's registrations
+      parameters:
+      - description: Reservation ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Reservation'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Get a reservation
+      tags:
+      - reservations
+  /reservations/{id}/cancel:
+    put:
+      description: 'Cancel the whole reservation. The places released go to the waiting
+        list. No automatic refund: has_successful_payment tells that the booker should
+        contact the guide.'
+      parameters:
+      - description: Reservation ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Reservation'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "409":
+          description: reservation_cancelled
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Cancel a reservation
+      tags:
+      - reservations
+  /reservations/{id}/confirm:
+    put:
+      description: Confirm a pending reservation, for its booker only, from 3 days
+        before the ramble until the confirmation deadline 12 hours before. When online
+        payment is enabled, payment holds the payment of the amount due, computed
+        from the participants' prices. On a confirmed reservation, it gives the payment
+        of the balance until the ramble starts.
+      parameters:
+      - description: Reservation ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ReservationWithPayment'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "409":
+          description: missing_prices, reservation_waiting_list, reservation_cancelled,
+            ramble_cancelled, confirmation_not_open, confirmation_deadline_passed,
+            ramble_started, or reservation_not_confirmed when the reservation changes
+            while its payment is prepared
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Confirm a reservation
+      tags:
+      - reservations
+  /reservations/{id}/participants:
+    post:
+      consumes:
+      - application/json
+      description: 'Add participants, until the ramble starts, to a pending or confirmed
+        reservation if they all fit in the places left, or to a reservation in waiting
+        list. Participants added to a confirmed reservation are confirmed, and payment
+        holds the complementary payment of their prices when online payment is enabled.
+        When the payment cannot be prepared, the participants stay added and payment_unavailable
+        is true: the complement is paid later through the confirmation. The booker
+        receives a summary email.'
+      parameters:
+      - description: Reservation ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Participants to add
+        in: body
+        name: participants
+        required: true
+        schema:
+          $ref: '#/definitions/ParticipantsAddPayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ReservationWithPayment'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "409":
+          description: not_enough_places, reservation_cancelled, ramble_cancelled
+            or ramble_started; reservation_waiting_list, reservation_not_confirmed
+            or missing_prices when the reservation changes while its payment is prepared
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Add participants to a reservation
+      tags:
+      - reservations
+  /reservations/{id}/participants/{participantId}:
+    delete:
+      description: Remove a participant. Removing the last one cancels the reservation.
+        The places released go to the waiting list. has_successful_payment tells that
+        the booker should contact the guide for a refund.
+      parameters:
+      - description: Reservation ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Participant ID
+        in: path
+        name: participantId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Reservation'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "409":
+          description: reservation_cancelled
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Remove a participant from a reservation
+      tags:
+      - reservations
+    put:
+      consumes:
+      - application/json
+      description: Change the name or the price of a participant, as long as the reservation
+        is not paid. Once paid, only a missing price (price_missing) can still be
+        specified.
+      parameters:
+      - description: Reservation ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Participant ID
+        in: path
+        name: participantId
+        required: true
+        type: integer
+      - description: Participant data
+        in: body
+        name: participant
+        required: true
+        schema:
+          $ref: '#/definitions/ParticipantUpdatePayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Reservation'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "409":
+          description: reservation_paid or reservation_cancelled
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Update a participant of a reservation
+      tags:
+      - reservations
+  /reservations/admin:
+    get:
+      description: Get the reservations with their participants, with filtering and
+        pagination (admin or guide)
+      parameters:
+      - description: Ramble ID
+        in: query
+        name: ramble_id
+        type: integer
+      - description: Exact contact email
+        in: query
+        name: email
+        type: string
+      - description: Contact email or participant name
+        in: query
+        name: search
+        type: string
+      - description: Part of the ramble title
+        in: query
+        name: ramble_title
+        type: string
+      - description: 'Status: pending, confirmed, waiting_list or cancelled'
+        in: query
+        name: status
+        type: string
+      - collectionFormat: csv
+        description: Several statuses
+        in: query
+        items:
+          type: string
+        name: statuses
+        type: array
+      - description: Booker account ID
+        in: query
+        name: user_id
+        type: integer
+      - description: Created since this date (YYYY-MM-DD)
+        in: query
+        name: date_from
+        type: string
+      - description: Created until this date included (YYYY-MM-DD)
+        in: query
+        name: date_to
+        type: string
+      - description: created_at (default), contact_email or status
+        in: query
+        name: sort_by
+        type: string
+      - description: asc or desc (default)
+        in: query
+        name: sort_order
+        type: string
+      - description: Page, from 1
+        in: query
+        name: page
+        type: integer
+      - description: Reservations per page, 50 by default
+        in: query
+        name: per_page
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/AdminReservationListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Get all reservations (admin)
+      tags:
+      - admin
+      - reservations
+  /reservations/admin/{id}:
+    delete:
+      description: Delete a reservation with its participants. The places it held
+        go to the waiting list, and its open payments are cancelled.
+      parameters:
+      - description: Reservation ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Delete a reservation (admin)
+      tags:
+      - admin
+      - reservations
+  /reservations/admin/{id}/participants/{participantId}:
+    put:
+      consumes:
+      - application/json
+      description: Change the name or the price of a participant, to correct an error.
+        The omitted fields are kept. Once the reservation is paid, the known prices
+        are frozen but the name can still be corrected and a missing price specified.
+      parameters:
+      - description: Reservation ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Participant ID
+        in: path
+        name: participantId
+        required: true
+        type: integer
+      - description: Participant data
+        in: body
+        name: participant
+        required: true
+        schema:
+          $ref: '#/definitions/AdminParticipantUpdatePayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Reservation'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "409":
+          description: reservation_paid or reservation_cancelled
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Update a participant of a reservation (admin)
+      tags:
+      - admin
+      - reservations
+  /reservations/admin/{id}/status:
+    put:
+      consumes:
+      - application/json
+      description: Set the status of a reservation, as a whole. A reservation put
+        back in pending, confirmed or waiting list from a status that holds no place
+        must fit entirely in the places left. The places released go to the waiting
+        list.
+      parameters:
+      - description: Reservation ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Status update data
+        in: body
+        name: status
+        required: true
+        schema:
+          $ref: '#/definitions/AdminReservationStatusUpdatePayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Reservation'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "409":
+          description: not_enough_places
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Update reservation status (admin)
+      tags:
+      - admin
+      - reservations
+  /reservations/admin/bulk-action:
+    post:
+      consumes:
+      - application/json
+      description: Confirm, cancel, move to waiting list or delete several reservations.
+        Each one follows the rules of the single actions, and fails separately.
+      parameters:
+      - description: Bulk action data
+        in: body
+        name: bulk
+        required: true
+        schema:
+          $ref: '#/definitions/BulkReservationActionPayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/BulkReservationActionResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ErrResponse'
+      summary: Bulk action on reservations (admin)
+      tags:
+      - admin
+      - reservations
 swagger: "2.0"

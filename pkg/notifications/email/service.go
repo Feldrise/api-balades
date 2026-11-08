@@ -28,14 +28,12 @@ func (s *emailService) Send(to string, subject string, templateName string, data
 	m.SetHeader("Reply-To", s.Credentials.Email)
 	m.SetHeader("Subject", subject)
 
-	t, _ := template.ParseFiles(s.TemplatesPath + "/" + templateName + ".html")
-	var body bytes.Buffer
+	body, err := Render(s.TemplatesPath, templateName, data)
+	if err != nil {
+		return err
+	}
 
-	body.Write([]byte(""))
-
-	t.Execute(&body, data)
-
-	m.SetBody("text/html", body.String())
+	m.SetBody("text/html", body)
 
 	// Add attachments if any
 	for _, attachment := range attachments {
@@ -49,4 +47,19 @@ func (s *emailService) Send(to string, subject string, templateName string, data
 	}
 
 	return nil
+}
+
+// Render executes the HTML template templateName found in templatesPath with data.
+func Render(templatesPath string, templateName string, data interface{}) (string, error) {
+	t, err := template.ParseFiles(templatesPath + "/" + templateName + ".html")
+	if err != nil {
+		return "", err
+	}
+
+	var body bytes.Buffer
+	if err := t.Execute(&body, data); err != nil {
+		return "", err
+	}
+
+	return body.String(), nil
 }

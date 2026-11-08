@@ -1,0 +1,25 @@
+meta {
+  name: Admin Delete Reservation
+  type: http
+  seq: 11
+}
+
+delete {
+  url: {{base_url}}/reservations/admin/{{reservation_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+docs {
+  Deletes the reservation. The places it held go to the waiting list, and its open payments are cancelled.
+}
+
+tests {
+  test("Status code is 204", function() {
+    expect(res.getStatus()).to.equal(204);
+  });
+}

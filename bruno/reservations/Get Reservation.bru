@@ -1,0 +1,25 @@
+meta {
+  name: Get Reservation
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/reservations/{{reservation_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+docs {
+  Restricted to the booker, or an admin or guide allowed to view the ramble's registrations.
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

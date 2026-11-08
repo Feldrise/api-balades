@@ -1,0 +1,27 @@
+meta {
+  name: Admin List Reservations
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{base_url}}/reservations/admin?ramble_id={{ramble_id}}&status=pending&page=1&per_page=20
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+docs {
+  Lists the reservations with their participants. Filters: `ramble_id`, `user_id`, `email` (exact), `search` (contact email or participant name), `ramble_title`, `status`, repeated `statuses`, `date_from` / `date_to` (creation date, YYYY-MM-DD), `sort_by` (`created_at`, `contact_email`, `status`), `sort_order`, `page`, `per_page`.
+
+  Admins see every ramble. Guides see the rambles they guide, and get 403 for another `ramble_id`.
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

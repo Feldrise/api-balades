@@ -5,6 +5,7 @@ import (
 
 	"feldrise.com/balade/database"
 	"feldrise.com/balade/database/dbmodel"
+	"feldrise.com/balade/pkg/clock"
 	"feldrise.com/balade/pkg/notifications/email"
 	"feldrise.com/balade/pkg/payments"
 	"feldrise.com/balade/pkg/payments/stripe"
@@ -48,18 +49,27 @@ type Config struct {
 	Constants
 
 	// Repositories
-	RambleRepository                  dbmodel.RambleRepository
-	RambleRegistrationRepository      dbmodel.RambleRegistrationRepository
-	RambleRegistrationGroupRepository dbmodel.RambleRegistrationGroupRepository
-	GuideRepository                   dbmodel.GuideRepository
-	UserPermissionOverrideRepository  dbmodel.UserPermissionOverrideRepository
-	UserRepository                    dbmodel.UserRepository
-	RoleRepository                    dbmodel.RoleRepository
-	PaymentRepository                 dbmodel.PaymentRepository
+	RambleRepository                 dbmodel.RambleRepository
+	ReservationRepository            dbmodel.ReservationRepository
+	GuideRepository                  dbmodel.GuideRepository
+	UserPermissionOverrideRepository dbmodel.UserPermissionOverrideRepository
+	UserRepository                   dbmodel.UserRepository
+	RoleRepository                   dbmodel.RoleRepository
+	PaymentRepository                dbmodel.PaymentRepository
 
 	// Services
 	EmailService   email.EmailService
 	PaymentService payments.PaymentService
+	Clock          clock.Clock
+}
+
+// Services are the external dependencies of the API, replaced by fakes in tests.
+type Services struct {
+	EmailService  email.EmailService
+	StripeService stripe.StripeService
+	Clock         clock.Clock
+	// PaymentTimeouts are shortened by tests, zero in production.
+	PaymentTimeouts dbmodel.PaymentTimeouts
 }
 
 func initViper(configName string) (Constants, error) {
@@ -116,56 +126,61 @@ func initViperEnv() error {
 }
 
 func New() (*Config, error) {
-	config := Config{}
-
 	constants, err := initViper("config")
-
 	if err != nil {
 		return nil, err
 	}
 
-	config.Constants = constants
-
 	// Database
-	databaseSession, err := gorm.Open(postgres.Open(config.ConnectionString), &gorm.Config{})
+	databaseSession, err := gorm.Open(postgres.Open(constants.ConnectionString), &gorm.Config{})
 	if err != nil {
 		return nil, err
 	}
 
 	database.Migrate(databaseSession)
 
+	services := Services{
+		EmailService: email.NewEmailService(
+			constants.DataPath+"/emails",
+			email.Credentials{
+				Host:     constants.EmailCredentials.Host,
+				Port:     constants.EmailCredentials.Port,
+				Email:    constants.EmailCredentials.Email,
+				Password: constants.EmailCredentials.Password,
+			},
+		),
+		StripeService: stripe.NewStripeService(),
+		Clock:         clock.Real(),
+	}
+
+	return Build(constants, databaseSession, services), nil
+}
+
+// Build wires the repositories and services on an already migrated database.
+func Build(constants Constants, databaseSession *gorm.DB, services Services) *Config {
+	config := Config{Constants: constants}
+
 	config.RambleRepository = dbmodel.NewRambleRepository(databaseSession)
-	config.RambleRegistrationRepository = dbmodel.NewRambleRegistrationRepository(databaseSession)
-	config.RambleRegistrationGroupRepository = dbmodel.NewRambleRegistrationGroupRepository(databaseSession)
+	config.ReservationRepository = dbmodel.NewReservationRepository(databaseSession)
 	config.GuideRepository = dbmodel.NewGuideRepository(databaseSession)
 	config.UserPermissionOverrideRepository = dbmodel.NewUserPermissionOverrideRepository(databaseSession)
 	config.UserRepository = dbmodel.NewUserRepository(databaseSession)
 	config.RoleRepository = dbmodel.NewRoleRepository(databaseSession)
-	config.PaymentRepository = dbmodel.NewPaymentRepository(databaseSession)
+	config.PaymentRepository = dbmodel.NewPaymentRepository(databaseSession, services.PaymentTimeouts)
 
-	// Email
-	config.EmailService = email.NewEmailService(
-		constants.DataPath+"/emails",
-		email.Credentials{
-			Host:     constants.EmailCredentials.Host,
-			Port:     constants.EmailCredentials.Port,
-			Email:    constants.EmailCredentials.Email,
-			Password: constants.EmailCredentials.Password,
-		},
-	)
+	config.EmailService = services.EmailService
+	config.Clock = services.Clock
 
 	// Payment Service
-	stripeService := stripe.NewStripeService()
 	encryptionService := security.NewEncryptionService(constants.JWTSecret)
 	config.PaymentService = payments.NewPaymentService(
 		config.PaymentRepository,
-		config.RambleRegistrationRepository,
-		config.RambleRegistrationGroupRepository,
 		config.RambleRepository,
 		config.GuideRepository,
-		stripeService,
+		services.StripeService,
 		encryptionService,
+		services.Clock,
 	)
 
-	return &config, nil
+	return &config
 }

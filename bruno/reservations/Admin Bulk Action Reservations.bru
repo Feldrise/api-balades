@@ -1,0 +1,34 @@
+meta {
+  name: Admin Bulk Action Reservations
+  type: http
+  seq: 12
+}
+
+post {
+  url: {{base_url}}/reservations/admin/bulk-action
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{auth_token}}
+}
+
+body:json {
+  {
+    "reservation_ids": [1, 2],
+    "action": "confirm",
+    "reason": "Confirmed by guide",
+    "send_email": false
+  }
+}
+
+docs {
+  Actions: `confirm`, `cancel`, `move_to_waiting`, `delete`. Each reservation follows the rules of the single action and fails separately: see `errors` in the response.
+}
+
+tests {
+  test("Status code is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

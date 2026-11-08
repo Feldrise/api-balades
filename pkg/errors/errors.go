@@ -11,8 +11,9 @@ type ErrResponse struct {
 	HTTPStatusCode int   `json:"-"` // http response status code
 
 	StatusText string `json:"status"`          // user-level status message
-	AppCode    int64  `json:"code,omitempty"`  // application-specific error code
-	ErrorText  string `json:"error,omitempty"` // application-level error message, for debugging
+	AppCode    int64  `json:"code,omitempty"`   // application-specific error code
+	Reason     string `json:"reason,omitempty"` // machine-readable business error, for clients to react to
+	ErrorText  string `json:"error,omitempty"`  // application-level error message, for debugging
 } // @name ErrResponse
 
 func (e *ErrResponse) Render(w http.ResponseWriter, r *http.Request) error {
@@ -59,6 +60,16 @@ func ErrForbidden(message string) render.Renderer {
 	return &ErrResponse{
 		HTTPStatusCode: 403,
 		StatusText:     message,
+		ErrorText:      message,
+	}
+}
+
+// ErrBusiness is a business rule violation identified by reason.
+func ErrBusiness(status int, reason string, message string) *ErrResponse {
+	return &ErrResponse{
+		HTTPStatusCode: status,
+		StatusText:     message,
+		Reason:         reason,
 		ErrorText:      message,
 	}
 }

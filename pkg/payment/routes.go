@@ -1,22 +1,21 @@
 package payment
 
 import (
-	"feldrise.com/balade/pkg/payments"
+	"feldrise.com/balade/config"
+	"feldrise.com/balade/pkg/authentication"
 	"github.com/go-chi/chi"
 )
 
-func Routes(paymentService payments.PaymentService) chi.Router {
+func Routes(configuration *config.Config) chi.Router {
 	r := chi.NewRouter()
 
-	controller := NewController(paymentService)
+	controller := NewController(configuration)
 
 	// Payment endpoints
-	r.Post("/", controller.CreatePayment)
 	r.Get("/{id}", controller.GetPayment)
-	r.Post("/{id}/refund", controller.RefundPayment)
+	r.With(authentication.RequireAnyPermission("refund:payments", "manage:payments")).Post("/{id}/refund", controller.RefundPayment)
+	// Public: the Stripe signature authenticates the webhook.
 	r.Post("/webhook", controller.WebhookHandler)
-
-	r.Get("/groups/{group_id}", controller.GetGroupPayments)
 
 	return r
 }

@@ -214,8 +214,8 @@ func TestConfirmationRequestAsksToSpecifyTheMissingPricesOfAMigratedReservation(
 	l := legacy{t, h}
 	ramble := h.CreateRamble(familyRamble())
 	l.registration(ramble, "Alice", "alice@example.com", "pending", nil)
-	reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "bob@example.com", Participants: people(2, "Adulte")})
 	h.MigrateAtStartup()
+	reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "bob@example.com", Participants: people(2, "Adulte")})
 
 	h.Clock.Set(ramble.Date.Add(-3*24*time.Hour + time.Hour))
 	sendConfirmationRequests(t, h)

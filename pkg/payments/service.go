@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"feldrise.com/balade/database/dbmodel"
@@ -18,6 +19,7 @@ import (
 	"feldrise.com/balade/pkg/payments/stripe"
 	"feldrise.com/balade/pkg/security"
 	stripego "github.com/stripe/stripe-go/v83"
+	"gorm.io/gorm"
 )
 
 type PaymentService interface {
@@ -77,6 +79,9 @@ type paymentService struct {
 	stripeService     stripe.StripeService
 	encryptionService security.EncryptionService
 	clock             clock.Clock
+	// loggedBeingCollected are the IDs of the obsolete payments found being
+	// collected on Stripe and logged, so as to log each once.
+	loggedBeingCollected sync.Map
 }
 
 func NewPaymentService(
@@ -99,12 +104,36 @@ func NewPaymentService(
 
 func (s *paymentService) CreatePaymentForReservation(reservation *dbmodel.Reservation, payerInfo PayerInfo) (*model.PaymentResponse, error) {
 	var response *model.PaymentResponse
+	var refusal error
 	err := s.paymentRepo.ForReservation(reservation.ID, func(ctx context.Context, payments dbmodel.PaymentRepository, locked *dbmodel.Reservation) error {
 		var err error
 		response, err = s.createPayment(ctx, payments, locked, payerInfo)
+		if isRefusal(err) {
+			// What was learnt on the way (payments cancelled, or paid without
+			// the webhook being received) is kept.
+			refusal = err
+			return nil
+		}
 		return err
 	})
-	return response, err
+	if err != nil {
+		return nil, err
+	}
+	return response, refusal
+}
+
+// isRefusal tells whether err is a decision not to create the payment, rather
+// than a failure.
+func isRefusal(err error) bool {
+	for _, refusal := range []error{
+		ErrReservationCancelled, ErrReservationWaitingList, ErrReservationNotConfirmed,
+		ErrRambleCancelled, ErrRambleStarted, ErrMissingPrices, ErrNothingToPay, errBeingCollected,
+	} {
+		if errors.Is(err, refusal) {
+			return true
+		}
+	}
+	return false
 }
 
 // createPayment gives the payment of the amount due by the reservation, locked.
@@ -128,8 +157,21 @@ func (s *paymentService) createPayment(ctx context.Context, payments dbmodel.Pay
 		return nil, err
 	}
 
-	if err := s.cancelObsoletePayments(ctx, payments, reservation, guide); err != nil {
+	collecting, err := s.cancelObsoletePayments(ctx, payments, reservation, guide)
+	if err != nil {
 		return nil, err
+	}
+	if collecting {
+		kept := keptPayment(reservation, guide)
+		for i := range reservation.Payments {
+			if open := &reservation.Payments[i]; open.IsOpen() && open != kept {
+				// Being paid: another payment could be paid twice.
+				return nil, errBeingCollected
+			}
+		}
+		// Paid on Stripe without the webhook being received: the amount due
+		// is another.
+		return s.createPayment(ctx, payments, reservation, payerInfo)
 	}
 
 	if kept := keptPayment(reservation, guide); kept != nil {
@@ -144,8 +186,15 @@ func (s *paymentService) createPayment(ctx context.Context, payments dbmodel.Pay
 			if err := payments.UpdateStatus(kept.ID, kept.Status); err != nil {
 				return nil, fmt.Errorf("failed to update payment: %w", err)
 			}
-		case stripego.PaymentIntentStatusSucceeded, stripego.PaymentIntentStatusProcessing:
-			return nil, errors.New("the payment is being collected, awaiting its confirmation by Stripe")
+		case stripego.PaymentIntentStatusSucceeded:
+			// Paid on Stripe without the webhook being received: what is
+			// left to pay, if anything, is another payment.
+			if err := recordCollected(payments, kept); err != nil {
+				return nil, err
+			}
+			return s.createPayment(ctx, payments, reservation, payerInfo)
+		case stripego.PaymentIntentStatusProcessing:
+			return nil, errBeingCollected
 		default:
 			kept.Guide = *guide
 			return &model.PaymentResponse{
@@ -223,7 +272,8 @@ func (s *paymentService) cancelUnpayablePayments(ctx context.Context, payments d
 	if err != nil {
 		return err
 	}
-	return s.cancelObsoletePayments(ctx, payments, reservation, guide)
+	_, err = s.cancelObsoletePayments(ctx, payments, reservation, guide)
+	return err
 }
 
 // payableTo returns the guide the reservation, locked, pays what it owes to,
@@ -262,8 +312,10 @@ func keptPayment(reservation *dbmodel.Reservation, guide *dbmodel.Guide) *dbmode
 
 // cancelObsoletePayments cancels every open payment of the reservation, locked,
 // but the one it may still pay to guide (see keptPayment), so that a single
-// payment can be paid at a time.
-func (s *paymentService) cancelObsoletePayments(ctx context.Context, payments dbmodel.PaymentRepository, reservation *dbmodel.Reservation, guide *dbmodel.Guide) error {
+// payment can be paid at a time. A payment Stripe refuses to cancel as it is
+// paid is recorded paid, and one being paid is left to its webhook: collecting
+// tells that one of them was found, the amount due being then other or unknown.
+func (s *paymentService) cancelObsoletePayments(ctx context.Context, payments dbmodel.PaymentRepository, reservation *dbmodel.Reservation, guide *dbmodel.Guide) (collecting bool, err error) {
 	kept := keptPayment(reservation, guide)
 
 	for i := range reservation.Payments {
@@ -274,29 +326,68 @@ func (s *paymentService) cancelObsoletePayments(ctx context.Context, payments db
 
 		guide, err := s.guideRepo.FindByID(open.GuideID)
 		if err != nil {
-			return fmt.Errorf("failed to find payment guide: %w", err)
+			return false, fmt.Errorf("failed to find payment guide: %w", err)
 		}
 		if guide == nil {
-			return errors.New("payment guide not found")
+			return false, errors.New("payment guide not found")
 		}
 		credentials, err := s.getGuideCredentials(guide)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if err := s.stripeService.CancelPaymentIntent(ctx, credentials, open.StripePaymentIntentID); err != nil {
-			// Stripe refuses to cancel a payment intent cancelled already.
+			// Stripe refuses to cancel a payment intent cancelled already, or
+			// paid, or being paid, without the webhook being received.
 			paymentIntent, retrieveErr := s.stripeService.RetrievePaymentIntent(ctx, credentials, open.StripePaymentIntentID)
-			if retrieveErr != nil || paymentIntent.Status != stripego.PaymentIntentStatusCanceled {
-				return fmt.Errorf("failed to cancel obsolete payment %d: %w", open.ID, err)
+			if retrieveErr != nil {
+				return false, fmt.Errorf("failed to cancel obsolete payment %d: %w", open.ID, err)
+			}
+			switch paymentIntent.Status {
+			case stripego.PaymentIntentStatusCanceled:
+			case stripego.PaymentIntentStatusSucceeded:
+				if err := recordCollected(payments, open); err != nil {
+					return false, err
+				}
+				collecting = true
+				continue
+			case stripego.PaymentIntentStatusProcessing:
+				// The webhook tells whether it is paid; it stays open till then.
+				if _, logged := s.loggedBeingCollected.LoadOrStore(open.ID, true); !logged {
+					log.Printf("Obsolete payment %d of reservation %d is being collected on Stripe, awaiting its webhook", open.ID, reservation.ID)
+				}
+				collecting = true
+				continue
+			default:
+				return false, fmt.Errorf("failed to cancel obsolete payment %d: %w", open.ID, err)
 			}
 		}
 
 		open.Status = "cancelled"
 		if err := payments.UpdateStatus(open.ID, open.Status); err != nil {
-			return fmt.Errorf("failed to update payment: %w", err)
+			return false, fmt.Errorf("failed to update payment: %w", err)
 		}
 	}
+	return collecting, nil
+}
+
+// recordCollected records that the open payment of the reservation, locked,
+// was paid on Stripe without the webhook being received, as the webhook would
+// have: it never downgrades a payment collected already.
+func recordCollected(payments dbmodel.PaymentRepository, open *dbmodel.Payment) error {
+	if _, err := payments.UpdateByStripePaymentIntentID(open.StripePaymentIntentID, dbmodel.CollectedPaymentStatuses, collectedChanges()); err != nil {
+		return fmt.Errorf("failed to update payment: %w", err)
+	}
+	open.Status = "succeeded"
 	return nil
+}
+
+// collectedChanges are the changes recording that a payment is paid, keeping
+// the date it was paid when known.
+func collectedChanges() map[string]any {
+	return map[string]any{
+		"status":  "succeeded",
+		"paid_at": gorm.Expr("COALESCE(paid_at, ?)", time.Now()),
+	}
 }
 
 // checkPayable tells why the reservation, locked, cannot be paid, if it cannot.
@@ -322,10 +413,7 @@ func (s *paymentService) checkPayable(reservation *dbmodel.Reservation) error {
 
 func (s *paymentService) ProcessPaymentSuccess(paymentIntentID string) error {
 	// A late event never brings back a refunded payment.
-	return s.recordStatus(paymentIntentID, dbmodel.CollectedPaymentStatuses, map[string]any{
-		"status":  "succeeded",
-		"paid_at": time.Now(),
-	})
+	return s.recordStatus(paymentIntentID, dbmodel.CollectedPaymentStatuses, collectedChanges())
 }
 
 func (s *paymentService) ProcessPaymentFailure(paymentIntentID string, failureReason ...string) error {
@@ -369,6 +457,8 @@ func (s *paymentService) recordStatus(paymentIntentID string, kept []string, cha
 }
 
 var errPaymentNotFound = errors.New("payment not found")
+
+var errBeingCollected = errors.New("the payment is being collected, awaiting its confirmation by Stripe")
 
 // recordRefund records that refunded cents of the payment of the payment intent
 // are refunded so far, all refunds included, as Stripe knows it: refunds made

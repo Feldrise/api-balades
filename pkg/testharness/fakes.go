@@ -115,13 +115,16 @@ type FakeStripeService struct {
 	mu             sync.Mutex
 	paymentIntents []CreatedPaymentIntent
 	cancelled      []string
-	refunds        []Refund
-	charged        map[string]int64
-	unavailable    bool
-	cancelFailing  bool
-	creationDelay  time.Duration
-	refundDelay    time.Duration
-	cancelDelay    time.Duration
+	// statuses are the statuses set on Stripe without the application
+	// knowing, as when a webhook was never received.
+	statuses      map[string]stripego.PaymentIntentStatus
+	refunds       []Refund
+	charged       map[string]int64
+	unavailable   bool
+	cancelFailing bool
+	creationDelay time.Duration
+	refundDelay   time.Duration
+	cancelDelay   time.Duration
 }
 
 // SetCancellationFailing makes the cancellation of payment intents fail, as
@@ -171,7 +174,17 @@ func (s *FakeStripeService) SetUnavailable(unavailable bool) {
 }
 
 func NewFakeStripeService() *FakeStripeService {
-	return &FakeStripeService{charged: map[string]int64{}}
+	return &FakeStripeService{charged: map[string]int64{}, statuses: map[string]stripego.PaymentIntentStatus{}}
+}
+
+// SetPaymentIntentStatus sets the status of the payment intent on Stripe
+// without any webhook, as when the payer pays and the webhook is never
+// received. Stripe then refuses to cancel it unless it can still be cancelled.
+func (s *FakeStripeService) SetPaymentIntentStatus(paymentIntentID string, status stripego.PaymentIntentStatus) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.statuses[paymentIntentID] = status
 }
 
 // Charge records that amount cents were charged on the payment intent, so that
@@ -269,6 +282,8 @@ func (s *FakeStripeService) RetrievePaymentIntent(ctx context.Context, credentia
 			status := stripego.PaymentIntentStatusRequiresPaymentMethod
 			if slices.Contains(s.cancelled, paymentIntentID) {
 				status = stripego.PaymentIntentStatusCanceled
+			} else if set, ok := s.statuses[paymentIntentID]; ok {
+				status = set
 			}
 			return &stripego.PaymentIntent{
 				ID:           intent.ID,
@@ -294,6 +309,10 @@ func (s *FakeStripeService) CancelPaymentIntent(ctx context.Context, credentials
 	if slices.Contains(s.cancelled, paymentIntentID) {
 		s.mu.Unlock()
 		return fmt.Errorf("payment intent %q is cancelled already", paymentIntentID)
+	}
+	if status := s.statuses[paymentIntentID]; status == stripego.PaymentIntentStatusSucceeded || status == stripego.PaymentIntentStatusProcessing {
+		s.mu.Unlock()
+		return fmt.Errorf("payment_intent_unexpected_state: you cannot cancel this PaymentIntent because it has a status of %s", status)
 	}
 	s.cancelled = append(s.cancelled, paymentIntentID)
 	delay := s.cancelDelay

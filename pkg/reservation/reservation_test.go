@@ -388,6 +388,23 @@ func TestReservationWithinThreeDaysOfRambleIsConfirmedAutomatically(t *testing.T
 	}
 }
 
+func TestReservationEmailGivesTheRambleDateInFrenchAndParisTime(t *testing.T) {
+	h := testharness.New(t)
+	rambleDate := time.Date(2030, time.June, 15, 9, 0, 0, 0, time.UTC)
+	h.Clock.Set(rambleDate.AddDate(0, -1, 0))
+	ramble := h.CreateRamble(testharness.RambleOptions{Date: &rambleDate})
+
+	reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(1, "")})
+
+	sent := h.Emails.SentWithTemplate("reservation_confirmation")
+	if len(sent) != 1 {
+		t.Fatalf("expected a single reservation email, got %d", len(sent))
+	}
+	if !strings.Contains(sent[0].Body, "samedi 15 juin 2030 à 11h00") {
+		t.Errorf("expected the ramble date as « samedi 15 juin 2030 à 11h00 », got %s", sent[0].Body)
+	}
+}
+
 func TestOnlyTheBookerOrAnAuthorizedStaffCanReadAReservation(t *testing.T) {
 	h := testharness.New(t)
 	ramble := h.CreateRamble(familyRamble())

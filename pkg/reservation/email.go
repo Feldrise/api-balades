@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"time"
 
 	"feldrise.com/balade/database/dbmodel"
 	"feldrise.com/balade/pkg/notifications/email"
@@ -49,7 +48,7 @@ func (config *Config) sendReservationEmail(reservation *dbmodel.Reservation, cha
 
 	data := email.ReservationConfirmationData{
 		Title:            ramble.Title,
-		Date:             formatDate(ramble.Date),
+		Date:             email.FormatDate(ramble.Date),
 		Location:         formatLocation(ramble.Location),
 		Status:           reservation.Status,
 		Change:           change,
@@ -78,17 +77,6 @@ func formatEuros(amount float64) string {
 
 func formatCents(amount int64) string {
 	return formatEuros(float64(amount) / 100)
-}
-
-func formatDate(date *time.Time) string {
-	if date == nil {
-		return "Date à confirmer"
-	}
-	loc, err := time.LoadLocation("Europe/Paris")
-	if err != nil {
-		return date.Local().Format("2 January 2006 à 15:04")
-	}
-	return date.In(loc).Format("2 January 2006 à 15:04")
 }
 
 func formatLocation(location *string) string {

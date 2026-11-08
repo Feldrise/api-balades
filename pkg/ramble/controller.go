@@ -696,7 +696,7 @@ func (config *Config) sendCancellationEmail(reservation *dbmodel.Reservation, ra
 		FirstName:          firstName,
 		LastName:           lastName,
 		Title:              ramble.Title,
-		Date:               formatDate(ramble.Date),
+		Date:               email.FormatDate(ramble.Date),
 		Location:           formatLocation(ramble.Location),
 		CancellationReason: formatCancellationReason(ramble.CancellationReason),
 	}
@@ -713,20 +713,6 @@ func (config *Config) sendCancellationEmail(reservation *dbmodel.Reservation, ra
 	} else {
 		fmt.Printf("Sent cancellation email to %s for ramble: %s\n", reservation.ContactEmail, ramble.Title)
 	}
-}
-
-// Helper functions for email formatting
-func formatDate(date *time.Time) string {
-	if date == nil {
-		return "Date à confirmer"
-	}
-	// Convert to Paris timezone
-	loc, err := time.LoadLocation("Europe/Paris")
-	if err != nil {
-		// Fallback to local time if Paris timezone can't be loaded
-		return date.Local().Format("2 January 2006 à 15:04")
-	}
-	return date.In(loc).Format("2 January 2006 à 15:04")
 }
 
 func formatLocation(location *string) string {

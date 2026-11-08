@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // AdminReservationFilterPayload filters the reservations listed to admins and guides.
@@ -138,3 +139,46 @@ func (payload *AdminParticipantUpdatePayload) Bind(r *http.Request) error {
 
 	return nil
 }
+
+// PresenceChangePayload is a change of the presence of a participant, made on
+// the guide's phone and possibly sent later, when the network is back.
+type PresenceChangePayload struct {
+	ParticipantID uint `json:"participant_id"`
+	// Present is true when present, false when absent, null to unmark.
+	Present *bool `json:"present"`
+	// MarkedAt is when the change was made on the phone: the latest change wins.
+	// It defaults to now, and a time in the future counts as now.
+	MarkedAt *time.Time `json:"marked_at,omitempty"`
+} // @name PresenceChangePayload
+
+type PresenceUpdatePayload struct {
+	Changes []PresenceChangePayload `json:"changes"`
+} // @name PresenceUpdatePayload
+
+func (payload *PresenceUpdatePayload) Bind(r *http.Request) error {
+	if len(payload.Changes) == 0 {
+		return errors.New("at least one change is required")
+	}
+	for _, change := range payload.Changes {
+		if change.ParticipantID == 0 {
+			return errors.New("each change needs a participant_id")
+		}
+	}
+	return nil
+}
+
+// PresenceOutcome tells what became of a presence change, with the presence
+// as stored afterwards. Outcome is applied, unchanged (the same change, or one
+// made at the same time, was already recorded), outdated (a later change was
+// already recorded), reservation_cancelled or unknown_participant.
+type PresenceOutcome struct {
+	ParticipantID    uint       `json:"participant_id"`
+	Outcome          string     `json:"outcome"`
+	Present          *bool      `json:"present"`
+	PresenceMarkedAt *time.Time `json:"presence_marked_at"`
+	PresenceMarkedBy *uint      `json:"presence_marked_by"`
+} // @name PresenceOutcome
+
+type PresenceUpdateResponse struct {
+	Participants []PresenceOutcome `json:"participants"`
+} // @name PresenceUpdateResponse

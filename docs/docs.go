@@ -1691,6 +1691,78 @@ const docTemplate = `{
                 }
             }
         },
+        "/reservations/admin/rambles/{rambleId}/presence": {
+            "put": {
+                "description": "Records the presence of participants of the ramble's reservations, from the day of the ramble (Paris time). Each change says when it was made on the guide's phone: the latest change wins, so changes queued offline can be sent again safely. A change is refused per participant (outcome reservation_cancelled or unknown_participant) without failing the others.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin",
+                    "reservations"
+                ],
+                "summary": "Mark the presence of participants (admin or guide)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Ramble ID",
+                        "name": "rambleId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Presence changes",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/PresenceUpdatePayload"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/PresenceUpdateResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "ramble_not_started",
+                        "schema": {
+                            "$ref": "#/definitions/ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/reservations/admin/{id}": {
             "delete": {
                 "description": "Delete a reservation with its participants. The places it held go to the waiting list, and its open payments are cancelled.",
@@ -2580,6 +2652,18 @@ const docTemplate = `{
                 "last_name": {
                     "type": "string"
                 },
+                "presence_marked_at": {
+                    "description": "PresenceMarkedAt is when the presence was last changed, as recorded on the guide's phone.",
+                    "type": "string"
+                },
+                "presence_marked_by": {
+                    "description": "PresenceMarkedBy is the ID of the account that last changed the presence.",
+                    "type": "integer"
+                },
+                "present": {
+                    "description": "Present is the presence at the ramble: null while not marked, true when present, false when absent.",
+                    "type": "boolean"
+                },
                 "price_amount": {
                     "description": "PriceAmount is the amount in euros of the participant's price, 0 when the price is missing.",
                     "type": "number"
@@ -2743,6 +2827,64 @@ const docTemplate = `{
                 "publishable_key": {
                     "description": "Stripe publishable key for frontend",
                     "type": "string"
+                }
+            }
+        },
+        "PresenceChangePayload": {
+            "type": "object",
+            "properties": {
+                "marked_at": {
+                    "description": "MarkedAt is when the change was made on the phone: the latest change wins.\nIt defaults to now, and a time in the future counts as now.",
+                    "type": "string"
+                },
+                "participant_id": {
+                    "type": "integer"
+                },
+                "present": {
+                    "description": "Present is true when present, false when absent, null to unmark.",
+                    "type": "boolean"
+                }
+            }
+        },
+        "PresenceOutcome": {
+            "type": "object",
+            "properties": {
+                "outcome": {
+                    "type": "string"
+                },
+                "participant_id": {
+                    "type": "integer"
+                },
+                "presence_marked_at": {
+                    "type": "string"
+                },
+                "presence_marked_by": {
+                    "type": "integer"
+                },
+                "present": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "PresenceUpdatePayload": {
+            "type": "object",
+            "properties": {
+                "changes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/PresenceChangePayload"
+                    }
+                }
+            }
+        },
+        "PresenceUpdateResponse": {
+            "type": "object",
+            "properties": {
+                "participants": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/PresenceOutcome"
+                    }
                 }
             }
         },
@@ -2986,6 +3128,10 @@ const docTemplate = `{
                 "contact_email": {
                     "type": "string"
                 },
+                "contact_phone": {
+                    "description": "ContactPhone is the phone of the booker, from their account, null when they gave none.",
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -3123,6 +3269,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "contact_email": {
+                    "type": "string"
+                },
+                "contact_phone": {
+                    "description": "ContactPhone is the phone of the booker, from their account, null when they gave none.",
                     "type": "string"
                 },
                 "created_at": {

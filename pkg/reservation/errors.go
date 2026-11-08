@@ -56,6 +56,10 @@ func errNotEnoughPlaces(placesLeft int) error {
 	}
 }
 
+func errRambleNotStarted() error {
+	return &businessError{status: http.StatusConflict, reason: "ramble_not_started", message: "presence can be marked from the day of the ramble"}
+}
+
 func errReservationCancelled() error {
 	return &businessError{status: http.StatusConflict, reason: "reservation_cancelled", message: "the reservation is cancelled"}
 }

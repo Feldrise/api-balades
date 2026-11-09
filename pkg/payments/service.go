@@ -53,7 +53,6 @@ var (
 	ErrReservationWaitingList  = errors.New("the reservation is in the waiting list")
 	ErrReservationNotConfirmed = errors.New("the reservation is not confirmed")
 	ErrRambleCancelled         = errors.New("the ramble is cancelled")
-	ErrRambleStarted           = errors.New("payment is closed once the ramble has started")
 	ErrMissingPrices           = errors.New("the price of every participant must be specified first")
 	ErrNothingToPay            = errors.New("nothing to pay for this reservation")
 )
@@ -127,7 +126,7 @@ func (s *paymentService) CreatePaymentForReservation(reservation *dbmodel.Reserv
 func isRefusal(err error) bool {
 	for _, refusal := range []error{
 		ErrReservationCancelled, ErrReservationWaitingList, ErrReservationNotConfirmed,
-		ErrRambleCancelled, ErrRambleStarted, ErrMissingPrices, ErrNothingToPay, errBeingCollected,
+		ErrRambleCancelled, ErrMissingPrices, ErrNothingToPay, errBeingCollected,
 	} {
 		if errors.Is(err, refusal) {
 			return true
@@ -401,8 +400,6 @@ func (s *paymentService) checkPayable(reservation *dbmodel.Reservation) error {
 		return ErrReservationNotConfirmed
 	case reservation.Ramble.IsCancelled:
 		return ErrRambleCancelled
-	case reservation.Ramble.HasStarted(s.clock.Now()):
-		return ErrRambleStarted
 	case reservation.HasMissingPrices():
 		return ErrMissingPrices
 	case reservation.AmountDue() <= 0:

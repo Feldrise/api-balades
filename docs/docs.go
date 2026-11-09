@@ -2122,7 +2122,7 @@ const docTemplate = `{
                         }
                     },
                     "409": {
-                        "description": "missing_prices, reservation_waiting_list, reservation_cancelled, ramble_cancelled, confirmation_not_open, confirmation_deadline_passed, ramble_started, or reservation_not_confirmed when the reservation changes while its payment is prepared",
+                        "description": "missing_prices, reservation_waiting_list, reservation_cancelled, ramble_cancelled, confirmation_not_open, confirmation_deadline_passed, or reservation_not_confirmed when the reservation changes while its payment is prepared",
                         "schema": {
                             "$ref": "#/definitions/ErrResponse"
                         }

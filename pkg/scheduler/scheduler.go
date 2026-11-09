@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	// tickPeriod is how often the payments left open are cancelled, so that a
-	// payment can hardly be made once the ramble has started.
+	// tickPeriod is how often the obsolete payments left open are cancelled,
+	// so that a payment the reservation no longer owes can hardly be made.
 	tickPeriod = time.Minute
 	// confirmationsPeriod is how often the confirmations are handled.
 	confirmationsPeriod = time.Hour

@@ -356,7 +356,7 @@ func TestPendingReservationIsConfirmedOnlyWithinTheConfirmationPeriod(t *testing
 	}
 }
 
-func TestConfirmedReservationBalanceIsPayableUntilTheRambleStarts(t *testing.T) {
+func TestConfirmedReservationBalanceIsPayableAfterTheRamble(t *testing.T) {
 	h := testharness.New(t)
 	ramble := h.CreateRamble(payingFamilyRamble())
 	h.Clock.Set(ramble.Date.Add(-2 * 24 * time.Hour))
@@ -370,9 +370,14 @@ func TestConfirmedReservationBalanceIsPayableUntilTheRambleStarts(t *testing.T) 
 		t.Fatalf("expected the balance payable after H-12, got %+v", unpaid.Payment)
 	}
 
-	h.Clock.Set(ramble.Date.Add(time.Minute))
-	if reason := confirmationRefusal(t, confirmReservation(h, created.ID, token)); reason != "ramble_started" {
-		t.Errorf("after the start: expected reason ramble_started, got %q", reason)
+	h.Clock.Set(ramble.Date.Add(7 * 24 * time.Hour))
+	var late reservationWithPayment
+	confirmReservation(h, created.ID, token).JSON(t, &late)
+	if late.Payment == nil || late.Payment.Payment.Amount != 2500 {
+		t.Fatalf("expected the balance still payable a week after the ramble, got %+v", late.Payment)
+	}
+	if intents := h.Stripe.PaymentIntents(); len(intents) != 1 {
+		t.Errorf("expected the same payment given back after the ramble, got %+v", intents)
 	}
 }
 

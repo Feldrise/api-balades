@@ -184,14 +184,11 @@ func (config *Config) confirmReservation(reservation *dbmodel.Reservation) error
 				return errMissingPrices()
 			}
 		}
-		now := config.Clock.Now()
 		if active.Status == dbmodel.ReservationStatusConfirmed {
-			// Its balance is payable until the ramble starts.
-			if locked.Ramble.HasStarted(now) {
-				return errRambleStarted()
-			}
+			// Its balance stays payable, even after the ramble.
 			return nil
 		}
+		now := config.Clock.Now()
 		if err := checkConfirmationPeriod(locked.Ramble, now); err != nil {
 			return err
 		}

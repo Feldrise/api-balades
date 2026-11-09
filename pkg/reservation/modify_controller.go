@@ -137,7 +137,7 @@ func (config *Config) UpdateParticipant(w http.ResponseWriter, r *http.Request) 
 // @Failure 401 {object} errors.ErrResponse
 // @Failure 403 {object} errors.ErrResponse
 // @Failure 404 {object} errors.ErrResponse
-// @Failure 409 {object} errors.ErrResponse "missing_prices, reservation_waiting_list, reservation_cancelled, ramble_cancelled, confirmation_not_open, confirmation_deadline_passed, ramble_started, or reservation_not_confirmed when the reservation changes while its payment is prepared"
+// @Failure 409 {object} errors.ErrResponse "missing_prices, reservation_waiting_list, reservation_cancelled, ramble_cancelled, confirmation_not_open, confirmation_deadline_passed, or reservation_not_confirmed when the reservation changes while its payment is prepared"
 // @Router /reservations/{id}/confirm [put]
 func (config *Config) Confirm(w http.ResponseWriter, r *http.Request) {
 	reservation, ok := config.bookerReservation(w, r)
@@ -260,8 +260,8 @@ func (config *Config) requestReservation(w http.ResponseWriter, r *http.Request)
 }
 
 // respondWithPayment renders the reservation as saved with, when it is
-// confirmed, online payment is enabled and the ramble has not started, the
-// payment of the amount it still owes. When the payment cannot be prepared, the change stays saved and
+// confirmed and online payment is enabled, the payment of the amount it still
+// owes, even after the ramble. When the payment cannot be prepared, the change stays saved and
 // payment_unavailable tells to pay later.
 func (config *Config) respondWithPayment(w http.ResponseWriter, r *http.Request, id uint) {
 	reservation, err := config.ReservationRepository.FindByID(id)
@@ -272,7 +272,7 @@ func (config *Config) respondWithPayment(w http.ResponseWriter, r *http.Request,
 
 	result := &model.ReservationWithPayment{}
 	if reservation.Status == dbmodel.ReservationStatusConfirmed && reservation.Ramble.PaymentEnabled && !reservation.Ramble.IsCancelled &&
-		!reservation.Ramble.HasStarted(config.Clock.Now()) && !reservation.HasMissingPrices() && reservation.AmountDue() > 0 {
+		!reservation.HasMissingPrices() && reservation.AmountDue() > 0 {
 		// The payment is decided once the reservation is locked, along with the
 		// cancellation of the payments it can no longer pay.
 		firstName, lastName := reservation.BookerName()
@@ -319,8 +319,6 @@ func notPayableError(err error) error {
 		return errReservationNotConfirmed()
 	case stderrors.Is(err, payments.ErrRambleCancelled):
 		return errRambleCancelled()
-	case stderrors.Is(err, payments.ErrRambleStarted):
-		return errRambleStarted()
 	case stderrors.Is(err, payments.ErrMissingPrices):
 		return errMissingPrices()
 	}

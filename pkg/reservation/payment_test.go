@@ -455,34 +455,25 @@ func TestParticipantsCannotBeAddedOnceTheRambleHasStarted(t *testing.T) {
 	}
 }
 
-func TestSchedulerCancelsTheOpenPaymentsOfStartedRambles(t *testing.T) {
+func TestSchedulerKeepsTheOpenPaymentsOfStartedRambles(t *testing.T) {
 	h := testharness.New(t)
-	started := h.CreateRamble(payingFamilyRamble())
-	later := h.CreateRamble(payingFamilyRamble())
-	startedReservation := reserve(t, h, reservationPayload{RambleID: started.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
-	openConfirmation(h, started)
-	confirmReservation(h, startedReservation.ID, h.Login("alice@example.com"))
-	startedIntent := h.Stripe.PaymentIntents()[0].ID
-	h.DB.Model(&dbmodel.Ramble{}).Where("id = ?", later.ID).Update("date", started.Date.Add(48*time.Hour))
-	laterReservation := reserve(t, h, reservationPayload{RambleID: later.ID, ContactEmail: "bob@example.com", Participants: people(1, "Adulte")})
-	h.DB.Model(&dbmodel.Reservation{}).Where("id = ?", laterReservation.ID).Update("status", "confirmed")
-	var laterPayment reservationWithPayment
-	confirmReservation(h, laterReservation.ID, h.Login("bob@example.com")).JSON(t, &laterPayment)
-	if laterPayment.Payment == nil {
-		t.Fatalf("expected a payment for the later ramble, got %+v", laterPayment)
-	}
+	ramble := h.CreateRamble(payingFamilyRamble())
+	created := reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
+	token := h.Login("alice@example.com")
+	openConfirmation(h, ramble)
+	confirmReservation(h, created.ID, token)
 
-	h.Clock.Set(started.Date.Add(time.Minute))
+	h.Clock.Set(ramble.Date.Add(24 * time.Hour))
 	if err := reservations.New(h.Config).ReconcileOpenPayments(); err != nil {
 		t.Fatalf("reconciling the open payments: %v", err)
 	}
 
-	if cancelled := h.Stripe.CancelledPaymentIntents(); len(cancelled) != 1 || cancelled[0] != startedIntent {
-		t.Errorf("expected only the payment of the started ramble cancelled on Stripe, got %v", cancelled)
+	if cancelled := h.Stripe.CancelledPaymentIntents(); len(cancelled) != 0 {
+		t.Errorf("expected the payment of the started ramble kept open to be paid after the ramble, got %v cancelled", cancelled)
 	}
-	got := getReservation(t, h, startedReservation.ID, h.Login("alice@example.com"))
-	if len(got.Payments) != 1 || got.Payments[0].Status != "cancelled" {
-		t.Errorf("expected the open payment of the started ramble cancelled, got %+v", got.Payments)
+	got := getReservation(t, h, created.ID, token)
+	if len(got.Payments) != 1 || got.Payments[0].Status != "pending" {
+		t.Errorf("expected the open payment of the started ramble kept, got %+v", got.Payments)
 	}
 }
 
@@ -538,9 +529,6 @@ func TestPaymentIsNotPreparedWhenTheReservationStopsBeingPayableDuringTheConfirm
 		{"ramble cancelled", func(h *testharness.Harness, tx *gorm.DB, created reservation, ramble *dbmodel.Ramble) {
 			tx.Exec("UPDATE rambles SET is_cancelled = true WHERE id = ?", ramble.ID)
 		}, "ramble_cancelled"},
-		{"ramble started", func(h *testharness.Harness, tx *gorm.DB, created reservation, ramble *dbmodel.Ramble) {
-			h.Clock.Set(ramble.Date.Add(time.Minute))
-		}, "ramble_started"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -894,9 +882,9 @@ func TestARefundOfMoreThanIsLeftAfterThePendingOneIsRefused(t *testing.T) {
 	}
 }
 
-// startedRambleWithOpenPayments returns the open payments of two reservations,
-// of alice then bob, on a ramble started since.
-func startedRambleWithOpenPayments(t *testing.T, h *testharness.Harness) (alice, bob reservation, aliceIntent, bobIntent string) {
+// cancelledRambleWithOpenPayments returns the open payments of two reservations,
+// of alice then bob, on a ramble cancelled since.
+func cancelledRambleWithOpenPayments(t *testing.T, h *testharness.Harness) (alice, bob reservation, aliceIntent, bobIntent string) {
 	t.Helper()
 	ramble := h.CreateRamble(payingFamilyRamble())
 	alice = reserve(t, h, reservationPayload{RambleID: ramble.ID, ContactEmail: "alice@example.com", Participants: people(2, "Adulte")})
@@ -908,13 +896,14 @@ func startedRambleWithOpenPayments(t *testing.T, h *testharness.Harness) (alice,
 	if len(intents) != 2 {
 		t.Fatalf("expected a payment for each reservation, got %+v", intents)
 	}
-	h.Clock.Set(ramble.Date.Add(time.Minute))
+	// Cancelled behind the API's back, the ramble leaves its payments open for the reconciliation.
+	h.DB.Model(&dbmodel.Ramble{}).Where("id = ?", ramble.ID).Update("is_cancelled", true)
 	return alice, bob, intents[0].ID, intents[1].ID
 }
 
 func TestReconciliationSkipsAReservationLockedByAnotherOperation(t *testing.T) {
 	h := testharness.New(t)
-	busy, _, busyIntent, idleIntent := startedRambleWithOpenPayments(t, h)
+	busy, _, busyIntent, idleIntent := cancelledRambleWithOpenPayments(t, h)
 
 	lock := h.DB.Begin()
 	defer lock.Rollback()
@@ -949,7 +938,7 @@ func TestReconciliationSkipsAReservationLockedByAnotherOperation(t *testing.T) {
 
 func TestReconciliationGivesUpOnASlowStripeWithoutHoldingTheReservation(t *testing.T) {
 	h := testharness.New(t, testharness.WithPaymentTimeouts(dbmodel.PaymentTimeouts{Reconciliation: 600 * time.Millisecond}))
-	alice, _, _, _ := startedRambleWithOpenPayments(t, h)
+	alice, _, _, _ := cancelledRambleWithOpenPayments(t, h)
 
 	h.Stripe.SetCancellationDelay(3 * time.Second)
 	started := time.Now()
